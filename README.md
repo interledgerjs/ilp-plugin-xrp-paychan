@@ -1,4 +1,4 @@
-# ilp-plugin-ripple
+# ilp-plugin-paychan
 
 Uses payment channels on ripple to do fast ILP transactions between you and a
 peer.  Current in-flight payments are at risk (your peer can choose not to give
@@ -8,7 +8,7 @@ you won't acknowledge incoming transfers until you're paid.
 # Example
 
 ```js
-const PluginRipple = require('ilp-plugin-ripple')
+const PluginRipple = require('ilp-plugin-paychan')
 
 new PluginRipple({
   // This is the server that ripple-lib submits transactions to.  You can
@@ -23,7 +23,7 @@ new PluginRipple({
   peerAddress: 'rhxcezvTxiANA3TkxBWpx923M5zQ4RZ9gJ',
 
   // secret for ed25519 secret key
-  secret: 'shh its a secret',
+  channelSecret: 'shh its a secret',
 
   // peer's ed25519 public key for verifying signatures
   peerPublicKey: 'KRixgcBCBdyQln7IBYiopjuNO78QSFtXgOwP1sbsCSk',
