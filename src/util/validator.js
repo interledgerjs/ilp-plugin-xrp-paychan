@@ -1,6 +1,5 @@
 'use strict'
 const BigNumber = require('bignumber.js')
-const cc = require('five-bells-condition')
 const InvalidFieldsError = require('./errors').InvalidFieldsError
 
 module.exports = class Validator {
@@ -108,9 +107,7 @@ function assertAccount (value, account, name) {
 function assertCondition (value, name) {
   if (!value) return
   assertString(value, name)
-  try {
-    cc.validateCondition(value)
-  } catch (e) {
+  if (Buffer.from(value, 'base64').length !== 32) {
     throw new InvalidFieldsError(name + ' (' + value + '): ' + e.message)
   }
 }
@@ -118,9 +115,7 @@ function assertCondition (value, name) {
 function assertFulfillment (value, name) {
   if (!value) return
   assertString(value, name)
-  try {
-    cc.fromFulfillmentUri(value)
-  } catch (e) {
+  if (Buffer.from(value, 'base64').length !== 32) {
     throw new InvalidFieldsError(name + ' (' + value + '): ' + e.message)
   }
 }

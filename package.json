@@ -4,14 +4,24 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "istanbul test -- _mocha"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "base64url": "^2.0.0",
     "bignum": "^0.12.5",
-    "eventemitter2": "^3.0.0",
+    "co-request": "^1.0.0",
+    "eventemitter2": "^3.0.1",
     "ripple-lib": "^0.17.4",
     "tweetnacl": "^0.14.5"
+  },
+  "devDependencies": {
+    "chai": "^3.5.0",
+    "co-mocha": "^1.2.0",
+    "istanbul": "^0.4.5",
+    "mocha": "^3.2.0",
+    "nock": "^9.0.6",
+    "uuid": "^3.0.1"
   }
 }

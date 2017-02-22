@@ -1,10 +1,14 @@
 'use strict'
 
+const Validator = require('../util/validator')
+const EventEmitter2 = require('eventemitter2')
 const base64url = require('base64url')
+const HttpRPC = require('./rpc')
 const RippleAPI = require('ripple-lib').RippleAPI
 const co = require('co')
 const util = require('../util')
 const Errors = require('../util/errors')
+const Balance = require('./balance')
 
 const wait = (timeout) => (new Promise((resolve, reject) => {
   setTimeout(() => {
@@ -12,8 +16,10 @@ const wait = (timeout) => (new Promise((resolve, reject) => {
   }, timeout)
 }))
 
-module.exports = class PluginPaychan {
+module.exports = class PluginPaychan extends EventEmitter2 {
   constructor (opts) {
+    super()
+
     this._server = opts.server
     this._address = opts.address
     this._secret = opts.secret
@@ -21,9 +27,25 @@ module.exports = class PluginPaychan {
     this._peerAddress = opts.peerAddress
     this._peerPublicKey = opts.peerPublicKey
     this._rpcUri = opts.rpcUri
+    this._store = opts._store
+    // TODO: optional param? if so, default?
+    this._maxInFlight = opts.maxInFlight
+    this._channelAmount = opts.channelAmount
+    this._prefix = 'g.crypto.ripple.'
+
+    this._validator = new Validator({
+      account: this._prefix + this._address,
+      peer: this._prefix + this._peerAddress,
+      prefix: this._prefix
+    })
 
     this._rpc = new HttpRPC(this._rpcUri, this)
     this._api = new RippleAPI({ server: this._server })
+    this._inFlight = new Balance({
+      name: 'balance_f',
+      maximum: this._maxInFlight,
+      store: this._store
+    })
 
     // bind the RPC methods
     this._rpc.addMethod('send_transfer', this._handleSendTransfer)
@@ -33,6 +55,8 @@ module.exports = class PluginPaychan {
     // public methods bound to generators
     this.sendTransfer = co.wrap(this._sendTransfer).bind(this)
     this.sendMessage = co.wrap(this._sendMessage).bind(this)
+    this.fulfillCondition = co.wrap(this._fulfillCondition).bind(this)
+    this.receive = co.wrap(this._rpc._receive).bind(this._rpc)
   }
 
   connect ({ timeout }) {
@@ -54,12 +78,12 @@ module.exports = class PluginPaychan {
   }
 
   getAccount () {
-    return 'g.crypto.ripple.' + this._address
+    return this._prefix + this._address
   }
 
   getInfo () {
     return {
-      prefix: 'g.crypto.ripple.',
+      prefix: this._prefix,
       scale: 6,
       precision: 12,
       currencySymbol: 'XRP',
@@ -75,14 +99,14 @@ module.exports = class PluginPaychan {
       util.omit(transfer, 'noteToSelf'),
     ])
 
-    yield this._emitAsync('outgoing_prepare', transfer))
+    yield this.emitAsync('outgoing_prepare', transfer)
   }
 
   * _handleSendTransfer (transfer, claim) {
     this._validator.validateIncomingTransfer(transfer)
 
-    const optimistic = !transfer.executionCondition
-    yield this._emitAsync('incoming_prepare', transfer)
+    yield this._inFlight.add(transfer.amount)
+    yield this.emitAsync('incoming_prepare', transfer)
 
     return true
   }
@@ -105,6 +129,7 @@ module.exports = class PluginPaychan {
       ])
 
       yield this._incomingChannel.receive(transfer, claim)
+      yield this._inFlight.sub(transfer.amount)
     }
   }
 
@@ -134,13 +159,13 @@ module.exports = class PluginPaychan {
   * _sendMessage (message) {
     this._validator.validateOutgoingMessage(message)
     yield this._rpc.call('send_message', this._prefix, [ message ])
-    yield this._emitAsync('outgoing_message', message)
+    yield this.emitAsync('outgoing_message', message)
   }
 
   * _handleSendMessage (message) {
     this._validator.validateIncomingMessage(message)
     // TODO: is yielding to event emitters a good idea in RPC calls?
-    yield this._emitAsync('incoming_message', message)
+    yield this.emitAsync('incoming_message', message)
 
     return true
   }

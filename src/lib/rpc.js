@@ -1,6 +1,6 @@
 const co = require('co')
 const EventEmitter = require('events')
-const debug = require('debug')('ilp-plugin-ripple:rpc')
+const debug = require('debug')('ilp-plugin-paychan:rpc')
 const request = require('co-request')
 
 // TODO: really call it HTTP RPC?
@@ -21,6 +21,7 @@ module.exports = class HttpRpc extends EventEmitter {
 
   * _receive (method, params) {
     // TODO: 4XX when method doesn't exist
+    debug('got request for', method)
     return yield this._methods[method].apply(this._that, params)
   }
 
