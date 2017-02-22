@@ -9,7 +9,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "bignum": "^0.12.5",
     "eventemitter2": "^3.0.0",
-    "ripple-lib": "^0.17.4"
+    "ripple-lib": "^0.17.4",
+    "tweetnacl": "^0.14.5"
   }
 }
