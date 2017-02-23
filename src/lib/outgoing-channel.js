@@ -2,7 +2,7 @@
 
 // TODO: faster library for crypto?
 const nacl = require('tweetnacl')
-const bignum = require('bignum')
+const BigNumber = require('bignumber.js')
 const co = require('co')
 const util = require('../util')
 const Balance = require('./balance')
@@ -10,9 +10,7 @@ const Balance = require('./balance')
 const getClaimMessage = (channelId, amount) => {
   const hashPrefix = Buffer.from('CLM\0', 'ascii')
   const idBuffer = Buffer.from(channelId, 'hex')
-  const amountBuffer = bignum(amount)
-    .mul('1000000')
-    .toBuffer({ endian: 'big', size: 4 })
+  const amountBuffer = util.toBuffer(new BigNumber(amount).mul('1000000'), 8)
 
   return Buffer.concat([
     hashPrefix, idBuffer, amountBuffer
@@ -30,33 +28,69 @@ module.exports = class OutgoingChannel {
     this._keyPair = nacl.sign.keyPair.fromSeed(util.sha256(opts.channelSecret))
     this._balance = new Balance({
       //     123456789
-      name: 'balance_o'
+      name: 'balance_o',
       maximum: this._amount,
-      store: this._store,
+      store: this._store
     })
   }
 
   * create () {
+    const existingChannel = yield this._store.get('channel_o')
+    if (existingChannel) {
+      this._channelId = existingChannel
+      return
+    }
 
-    // TODO: look up channel in table
-
-    console.log(this._address, this._destination)
+    const txTag = util.randomTag()
     const tx = yield this._api.preparePaymentChannelCreate(this._address, {
       amount: this._amount,
       destination: this._destination,
       settleDelay: 90000,
-      publicKey: Buffer.from(this._keyPair.publicKey).toString('hex').toUpperCase()
+      publicKey: Buffer.from(this._keyPair.publicKey).toString('hex').toUpperCase(),
+      sourceTag: txTag
       // TODO: specify a cancelAfter?
     })
-    console.log(JSON.stringify(JSON.parse(tx.txJSON)), null, 2)
 
     const signedTx = this._api.sign(tx.txJSON, this._secret)
     const result = yield this._api.submit(signedTx.signedTransaction)
-    console.log('submitted transaction:', result)
 
-    // TODO: wait for the validation on the network?
-    // TODO: store the hash in the store
-    // TODO: broadcast the hash to the peer and wait on that for connect event
+    /*console.log('submitted transaction:', result)
+    console.log('source tag:', txTag)*/
+
+    return new Promise((resolve) => {
+      this._api.connection.on('transaction', (ev) => {
+        /*console.log('got event:', ev)
+        console.log('tags are:', ev.transaction.SourceTag, txTag)*/
+        if (ev.transaction.SourceTag !== txTag) return
+        //console.log('got the right source tag')
+        // if the source tags somehow match up
+        if (ev.transaction.Account !== this._address) return
+        //console.log('trying to create channel ID now')
+
+        const channelId = util.channelId(
+          this._address,
+          this._destination,
+          ev.transaction.Sequence)
+
+        //console.log('got channel ID:', channelId)
+        this._channelId = channelId
+        this._hash = ev.transaction.hash
+
+        this._store.put('channel_o', channelId)
+          .then(() => resolve())
+          .catch((e) => {
+            console.error(e)
+          })
+      })
+    })
+  }
+
+  getChannelId () {
+    return this._channelId
+  }
+
+  getHash () {
+    return this._hash
   }
 
   * send (transfer) {

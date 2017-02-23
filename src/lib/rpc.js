@@ -22,6 +22,7 @@ module.exports = class HttpRpc extends EventEmitter {
   * _receive (method, params) {
     // TODO: 4XX when method doesn't exist
     debug('got request for', method)
+    debug('got params:', params)
     return yield this._methods[method].apply(this._that, params)
   }
 

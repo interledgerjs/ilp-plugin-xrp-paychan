@@ -9,8 +9,12 @@ const co = require('co')
 const util = require('../util')
 const Errors = require('../util/errors')
 const Balance = require('./balance')
+const OutgoingChannel = require('./outgoing-channel')
+const IncomingChannel = require('./incoming-channel')
+const TransferLog = require('./transferlog')
 
 const wait = (timeout) => (new Promise((resolve, reject) => {
+  if (!timeout) return
   setTimeout(() => {
     if (timeout) reject(new Error('timed out'))
   }, timeout)
@@ -25,7 +29,6 @@ module.exports = class PluginPaychan extends EventEmitter2 {
     this._secret = opts.secret
     this._channelSecret = opts.channelSecret
     this._peerAddress = opts.peerAddress
-    this._peerPublicKey = opts.peerPublicKey
     this._rpcUri = opts.rpcUri
     this._store = opts._store
     // TODO: optional param? if so, default?
@@ -47,10 +50,31 @@ module.exports = class PluginPaychan extends EventEmitter2 {
       store: this._store
     })
 
+    this._transfers = new TransferLog({
+      store: this._store
+    })
+
+    this._connected = false
+    this._incomingChannel = new IncomingChannel({
+      api: this._api,
+      address: this._address,
+      store: this._store
+    })
+    this._outgoingChannel = new OutgoingChannel({
+      api: this._api,
+      address: this._address,
+      secret: this._secret,
+      channelSecret: this._channelSecret,
+      destination: this._peerAddress,
+      amount: this._channelAmount,
+      store: this._store
+    })
+
     // bind the RPC methods
     this._rpc.addMethod('send_transfer', this._handleSendTransfer)
     this._rpc.addMethod('send_message', this._handleSendMessage)
     this._rpc.addMethod('fulfill_condition', this._handleFulfillCondition)
+    this._rpc.addMethod('get_hash', this._getHash)
 
     // public methods bound to generators
     this.sendTransfer = co.wrap(this._sendTransfer).bind(this)
@@ -59,7 +83,8 @@ module.exports = class PluginPaychan extends EventEmitter2 {
     this.receive = co.wrap(this._rpc._receive).bind(this._rpc)
   }
 
-  connect ({ timeout }) {
+  connect (opts) {
+    const timeout = opts && opts.timeout
     const that = this
     return Promise.race([
       (co.wrap(this._connect).bind(this))(),
@@ -70,11 +95,26 @@ module.exports = class PluginPaychan extends EventEmitter2 {
   }
 
   * _connect () {
-    yield this.api.connect()
-    yield this.api.connection.request({
+    yield this._api.connect()
+    yield this._api.connection.request({
       command: 'subscribe',
       accounts: [ this._address ]
     })
+    yield this._outgoingChannel.create()
+    while (true) { // this will be limited by the timeout in connect
+      try {
+        const hash = yield this._rpc.call('get_hash', this._prefix, [])
+        console.log('got hash', hash)
+        yield this._incomingChannel.create({ hash })
+        break
+      } catch (e) {
+        // TODO: use debug
+        // console.error(e)
+      }
+      // TODO: customize timeout?
+      yield wait(5000).catch((e) => {})
+    }
+    yield this.emitAsync('connect')
   }
 
   getAccount () {
@@ -91,19 +131,26 @@ module.exports = class PluginPaychan extends EventEmitter2 {
     }
   }
 
+  * _getHash () {
+    return this._outgoingChannel.getHash()
+  }
+
   * _sendTransfer (rawTransfer) {
+    // TODO: fill in `from`
     const transfer = Object.assign({ ledger: this._prefix }, rawTransfer)
     this._validator.validateOutgoingTransfer(transfer)
+    yield this._transfers.storeOutgoing(transfer)
 
     yield this._rpc.call('send_transfer', this._prefix, [
-      util.omit(transfer, 'noteToSelf'),
+      Object.assign(transfer, { noteToSelf: undefined }),
     ])
 
     yield this.emitAsync('outgoing_prepare', transfer)
   }
 
-  * _handleSendTransfer (transfer, claim) {
+  * _handleSendTransfer (transfer) {
     this._validator.validateIncomingTransfer(transfer)
+    yield this._transfers.storeIncoming(transfer)
 
     yield this._inFlight.add(transfer.amount)
     yield this.emitAsync('incoming_prepare', transfer)
@@ -125,7 +172,7 @@ module.exports = class PluginPaychan extends EventEmitter2 {
 
       // TODO: should the claim get rolled back if fulfill condition returns an error 
       const claim = yield this._rpc.call('fulfill_condition', this._prefix, [
-        transferId, fulfillment, claim
+        transferId, fulfillment
       ])
 
       yield this._incomingChannel.receive(transfer, claim)
