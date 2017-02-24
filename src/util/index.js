@@ -5,15 +5,17 @@ const crypto = require('crypto')
 const addressCodec = require('ripple-address-codec')
 
 function channelId (src, dest, sequence) {
-  
-  const hash = crypto.createHash('sha512')
+  const preimage = Buffer.concat([
+    Buffer.from('\0\0\0x', 'ascii'),
+    Buffer.from(addressCodec.decodeAccountID(src)),
+    Buffer.from(addressCodec.decodeAccountID(dest)),
+    bignum(sequence).toBuffer({ endian: 'big', size: 4 })
+  ])
 
-  hash.update(Buffer.from('x', 'ascii'))
-  hash.update(Buffer.from(addressCodec.decodeAccountID(src)))
-  hash.update(Buffer.from(addressCodec.decodeAccountID(dest)))
-  hash.update(bignum(sequence).toBuffer({ endian: 'big', size: 4 }))
+  console.log('PREIMAGE:',preimage)
 
-  return hash
+  return crypto.createHash('sha512')
+    .update(preimage)
     .digest()
     .slice(0, 32) // first half sha512
     .toString('hex')
