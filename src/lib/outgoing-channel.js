@@ -46,11 +46,12 @@ module.exports = class OutgoingChannel {
       amount: this._amount,
       destination: this._destination,
       settleDelay: 90000,
-      publicKey: Buffer.from(this._keyPair.publicKey).toString('hex').toUpperCase(),
+      publicKey: 'ED' + Buffer.from(this._keyPair.publicKey).toString('hex').toUpperCase(),
       sourceTag: txTag
       // TODO: specify a cancelAfter?
     })
 
+    console.log('PUBLIC KEY:', Buffer.from(this._keyPair.publicKey).toString('hex').toUpperCase())
     const signedTx = this._api.sign(tx.txJSON, this._secret)
     const result = yield this._api.submit(signedTx.signedTransaction)
 
@@ -58,6 +59,7 @@ module.exports = class OutgoingChannel {
     console.log('source tag:', txTag)*/
 
     return new Promise((resolve) => {
+      // TODO: remove this listener
       this._api.connection.on('transaction', (ev) => {
         /*console.log('got event:', ev)
         console.log('tags are:', ev.transaction.SourceTag, txTag)*/
@@ -102,9 +104,14 @@ module.exports = class OutgoingChannel {
 
     // this will complain if the amount exceeds the maximum
     yield this._balance.add(transfer.amount)
+    const claim = yield this._balance.get()
 
-    const message = getClaimMessage(this._channelId, transfer.amount)
+    console.log('making claim: ' + claim)
+
+    const message = getClaimMessage(this._channelId, claim)
+    console.log('made claim:', message)
     const signature = nacl.sign(message, this._keyPair.secretKey)
+
     return Buffer.from(signature).toString('hex')
   }
 }

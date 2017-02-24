@@ -10,12 +10,14 @@ const co = require('co')
 module.exports = class IncomingChannel {
   constructor (opts) {
     this._api = opts.api
-    // TODO: needs a secret once it starts claiming and stuff
+    this._secret = opts.secret
     this._address = opts.address
     // TODO: uintarray, buffer, or string?
     this._balance = null 
     this._store = opts.store
     this._claim = null
+    // TODO: stop hardcoding this
+    this._settlePercent = new BigNumber('0.8')
 
     // TODO: get this channel by the transaction hash?
     // TODO: how to listen for the channel's pending expiry
@@ -34,16 +36,17 @@ module.exports = class IncomingChannel {
         + ' but our address is ' + this._address)
     }
 
-    this._publicKey = Buffer.from(this._tx.PublicKey, 'hex')
+    this._publicKey = Buffer.from(this._tx.PublicKey, 'hex').slice(1)
     this._channelId = util.channelId(
       this._tx.Account,
       this._tx.Destination,
       this._tx.Sequence)
 
+    this._maximum = (new BigNumber(this._tx.Amount)).div('1000000')
     this._balance = new Balance({
       //     123456789
       name: 'balance_i',
-      maximum: bignum(this._tx.Amount).div('1000000').toString(),
+      maximum: this._maximum.toString(),
       store: this._store
     })
   }
@@ -52,8 +55,6 @@ module.exports = class IncomingChannel {
     if (!this._channelId) {
       throw new Error('channel has not been created')
     }
-
-    // TODO: when to submit claims?
 
     const message = Buffer.from(nacl.sign.open(
       Buffer.from(claim, 'hex'),
@@ -73,8 +74,8 @@ module.exports = class IncomingChannel {
         channelId.toString('hex').toUpperCase())
     }
 
-    const balance = yield this._balance.get()
-    const newAmount = new BigNumber(balance)
+    const oldBalance = new BigNumber(yield this._balance.get())
+    const newBalance = oldBalance
       .add(transfer.amount)
       .mul('1000000')
 
@@ -84,10 +85,10 @@ module.exports = class IncomingChannel {
       size: 8
     }).toString())
 
-    if (!newAmount.eq(signedAmount)) {
+    if (!newBalance.eq(signedAmount)) {
       throw new Error('claim amount doesn\'t match transfer amount. Transfer: '
         + transfer.amount + ' XRP. Balance: '
-        + balance + ' XRP. Claimed amount: '
+        + oldBalance.toString() + ' XRP. Claimed amount: '
         + signedAmount.toString() + ' Drops.')
     }
 
@@ -98,5 +99,59 @@ module.exports = class IncomingChannel {
     // if the other side is sending claims we can't cash, then this will
     // figure it out
     yield this._balance.add(transfer.amount)
+    this._claim = claim
+
+    console.log('new balance:',
+      newBalance.toString(),
+      '\nmaximum:',
+      this._maximum.toString(),
+      '\nthreshold:',
+      this._maximum.mul(this._settlePercent).toString())
+
+    // TODO: check if this should be claimed
+    if (newBalance.gt(this._maximum.mul(this._settlePercent))) {
+      // this should go asynchronously?
+      console.log('the new balance is greater than the threshold')
+      yield this._claimFunds()
+      //co(this._claimFunds.bind(this))
+    }
+  }
+
+  * _claimFunds () {
+    console.log('getting the balance')
+
+    console.log('preparing to claim the funds')
+    const txTag = util.randomTag()
+    const tx = yield this._api.preparePaymentChannelClaim(this._address, {
+      balance: yield this._balance.get(),
+      channel: this._channelId,
+      signature: this._claim.toString('hex').toUpperCase().substring(1),
+      publicKey: 'ED' + this._publicKey.toString('hex').toUpperCase(),
+      // TODO: should this maybe get kept open?
+      close: true
+    })
+
+    const txJSON = JSON.parse(tx.txJSON)
+//    delete txJSON.Account
+//    delete txJSON.TransactionType
+    console.log(JSON.stringify(txJSON, null, 2))
+    tx.txJSON = JSON.stringify(txJSON)
+
+
+    console.log('signing claim funds tx')
+    const signedTx = this._api.sign(tx.txJSON, this._secret)
+    console.log('submitting')
+    console.log('signedTx:', signedTx)
+    const result = yield this._api.submit(signedTx.signedTransaction)
+
+    return new Promise((resolve) => {
+      this._api.connection.on('transaction', (ev) => {
+        if (ev.transaction.SourceTag !== txTag) return
+        if (ev.transaction.Channel !== this._channelId) return
+
+        console.log('yay I claimed the funds. what now?')
+        resolve()
+      })
+    })
   }
 }

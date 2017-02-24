@@ -58,6 +58,7 @@ module.exports = class PluginPaychan extends EventEmitter2 {
     this._incomingChannel = new IncomingChannel({
       api: this._api,
       address: this._address,
+      secret: this._secret,
       store: this._store
     })
     this._outgoingChannel = new OutgoingChannel({
@@ -109,7 +110,7 @@ module.exports = class PluginPaychan extends EventEmitter2 {
         break
       } catch (e) {
         // TODO: use debug
-        // console.error(e)
+        console.error(e)
       }
       // TODO: customize timeout?
       yield wait(5000).catch((e) => {})
