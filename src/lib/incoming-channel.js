@@ -56,6 +56,8 @@ module.exports = class IncomingChannel {
       throw new Error('channel has not been created')
     }
 
+    // TODO: claim the funds
+/*
     const message = Buffer.from(nacl.sign.open(
       Buffer.from(claim, 'hex'),
       this._publicKey))
@@ -74,11 +76,12 @@ module.exports = class IncomingChannel {
         channelId.toString('hex').toUpperCase())
     }
 
+*/
     const oldBalance = new BigNumber(yield this._balance.get())
     const newBalance = oldBalance
       .add(transfer.amount)
       .mul('1000000')
-
+/*
     console.log('AMOUNT:', amount)
     const signedAmount = new BigNumber(bignum.fromBuffer(amount, {
       endian: 'big',
@@ -95,6 +98,7 @@ module.exports = class IncomingChannel {
     console.log('got claim for total ' +
       signedAmount.toString() +
       ' drops on transfer amount ' + transfer.amount)
+*/
 
     // if the other side is sending claims we can't cash, then this will
     // figure it out
@@ -125,24 +129,18 @@ module.exports = class IncomingChannel {
     const tx = yield this._api.preparePaymentChannelClaim(this._address, {
       balance: yield this._balance.get(),
       channel: this._channelId,
-      signature: this._claim.toString('hex').toUpperCase().substring(1),
+      signature: this._claim.toString('hex').toUpperCase(),
       publicKey: 'ED' + this._publicKey.toString('hex').toUpperCase(),
       // TODO: should this maybe get kept open?
       close: true
     })
-
-    const txJSON = JSON.parse(tx.txJSON)
-//    delete txJSON.Account
-//    delete txJSON.TransactionType
-    console.log(JSON.stringify(txJSON, null, 2))
-    tx.txJSON = JSON.stringify(txJSON)
-
 
     console.log('signing claim funds tx')
     const signedTx = this._api.sign(tx.txJSON, this._secret)
     console.log('submitting')
     console.log('signedTx:', signedTx)
     const result = yield this._api.submit(signedTx.signedTransaction)
+    console.log('submitted')
 
     return new Promise((resolve) => {
       this._api.connection.on('transaction', (ev) => {

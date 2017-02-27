@@ -110,7 +110,7 @@ module.exports = class OutgoingChannel {
 
     const message = getClaimMessage(this._channelId, claim)
     console.log('made claim:', message)
-    const signature = nacl.sign(message, this._keyPair.secretKey)
+    const signature = nacl.sign.detached(message, this._keyPair.secretKey)
 
     return Buffer.from(signature).toString('hex')
   }
