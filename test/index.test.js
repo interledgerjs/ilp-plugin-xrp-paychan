@@ -3,11 +3,11 @@
 const nock = require('nock')
 const Store = require('./helpers/store')
 const assert = require('chai').assert
-const PluginPaychan = require('..')
+const PluginXrpPaychan = require('..')
 
-describe('PluginPaychan', () => {
+describe('PluginXrpPaychan', () => {
   beforeEach(function () {
-    this.plugin = new PluginPaychan({
+    this.plugin = new PluginXrpPaychan({
       // TODO: a mock for the ripple server/API
       server: 'wss://s.altnet.rippletest.net:51233',
       address: 'rGjwZgV18qZD6mnqGoCSwW3Q3HPd7MjQwR',
@@ -25,7 +25,7 @@ describe('PluginPaychan', () => {
 
   describe('constructor', () => {
     it('should be a function', () => {
-      assert.isFunction(PluginPaychan)
+      assert.isFunction(PluginXrpPaychan)
     })
 
     it('should construct an object', function () {

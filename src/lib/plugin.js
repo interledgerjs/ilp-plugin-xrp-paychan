@@ -20,7 +20,7 @@ const wait = (timeout) => (new Promise((resolve, reject) => {
   }, timeout)
 }))
 
-module.exports = class PluginPaychan extends EventEmitter2 {
+module.exports = class PluginXrpPaychan extends EventEmitter2 {
   constructor (opts) {
     super()
 
