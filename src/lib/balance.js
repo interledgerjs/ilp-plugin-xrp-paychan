@@ -19,6 +19,18 @@ module.exports = class Balance extends EventEmitter {
     this._key = opts.name
   }
 
+  getMax () {
+    return this._maximum
+  }
+
+  addMax (max) {
+    this._maximum = this._maximum.add(max)
+  }
+
+  setMax (max) {
+    this._maximum = new BigNumber(max)
+  }
+
   * get () {
     return (yield this._getNumber()).toString()
   }

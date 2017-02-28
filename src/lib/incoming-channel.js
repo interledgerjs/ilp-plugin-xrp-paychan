@@ -23,6 +23,11 @@ module.exports = class IncomingChannel {
     // TODO: how to listen for the channel's pending expiry
   }
 
+  * getBalance () {
+    if (!this._channelId) throw new Error('must be connected before getBalance')
+    return yield this._balance.get()
+  }
+
   * create ({ hash }) {
     // fetches details from the network to initialize
     this._hash = hash
@@ -113,7 +118,7 @@ module.exports = class IncomingChannel {
       this._maximum.mul(this._settlePercent).toString())
 
     // TODO: check if this should be claimed
-    if (newBalance.gt(this._maximum.mul(this._settlePercent))) {
+    if (newBalance.gt(this._maximum.mul(this._settlePercent).mul('1000000'))) {
       // this should go asynchronously?
       console.log('the new balance is greater than the threshold')
       yield this._claimFunds()
@@ -131,8 +136,6 @@ module.exports = class IncomingChannel {
       channel: this._channelId,
       signature: this._claim.toString('hex').toUpperCase(),
       publicKey: 'ED' + this._publicKey.toString('hex').toUpperCase(),
-      // TODO: should this maybe get kept open?
-      close: true
     })
 
     console.log('signing claim funds tx')
@@ -142,14 +145,59 @@ module.exports = class IncomingChannel {
     const result = yield this._api.submit(signedTx.signedTransaction)
     console.log('submitted')
 
-    return new Promise((resolve) => {
-      this._api.connection.on('transaction', (ev) => {
-        if (ev.transaction.SourceTag !== txTag) return
-        if (ev.transaction.Channel !== this._channelId) return
+    const claim = this._claim.toString('hex').toUpperCase()
 
-        console.log('yay I claimed the funds. what now?')
+    // TODO: should this wait for confirm?
+    /*
+    return new Promise((resolve) => {
+      const api = this._api
+
+      function claimCheck (ev) {
+        console.log(ev.transaction.TransactionType)
+        if (ev.transaction.TransactionType !== 'PaymentChannelClaim') return
+        if (ev.transaction.Signature !== claim) return
+
+        console.log('CLAIM TRANSACTION', ev.transaction)
+
+        console.log('yay I claimed the funds. what now? ' + txTag)
+        api.connection.removeListener('transaction', claimCheck)
         resolve()
-      })
+      }
+
+      this._api.connection.on('transaction', claimCheck)
+    })
+    */
+  }
+
+  * receiveFund (hash) {
+    const fundTx = yield this._api.connection.request({
+      command: 'tx',
+      transaction: hash
+    })
+
+    // the fund notification is out of date
+    if (fundTx.Sequence < this._lastSequence) {
+      console.log('got out of date fund notification')
+      return
+    }
+
+    console.log('setting last sequence for fund to', fundTx.Sequence)
+    this._lastSequence = fundTx.Sequence
+
+    const channel = this._channelId.toString('hex').toUpperCase()
+    fundTx.meta.AffectedNodes.forEach((node) => {
+      if (!node.ModifiedNode) return
+      console.log('processing fund update node', node)
+      console.log('index', node.ModifiedNode.LedgerIndex, 'channel', channel)
+      if (node.ModifiedNode.LedgerIndex !== channel) {
+        return
+      }
+
+      const newMax = new BigNumber(node.ModifiedNode.FinalFields.Amount)
+        .div('1000000')
+        
+      console.log('setting new channel maximum to', newMax.toString())
+      this._balance.setMax(newMax)
     })
   }
 }

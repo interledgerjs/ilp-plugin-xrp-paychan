@@ -34,6 +34,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     // TODO: optional param? if so, default?
     this._maxInFlight = opts.maxInFlight
     this._channelAmount = opts.channelAmount
+    // TODO: address-pair-specific prefix like plugin virtual
     this._prefix = 'g.crypto.ripple.'
 
     this._validator = new Validator({
@@ -71,16 +72,27 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
       store: this._store
     })
 
+    // channel-maximum updating flow
+    this._outgoingChannel.on('fund', (tx) => {
+      this._rpc.call('_fund', this._prefix, [ tx.hash ])
+    })
     // bind the RPC methods
     this._rpc.addMethod('send_transfer', this._handleSendTransfer)
     this._rpc.addMethod('send_message', this._handleSendMessage)
     this._rpc.addMethod('fulfill_condition', this._handleFulfillCondition)
-    this._rpc.addMethod('get_hash', this._getHash)
+    this._rpc.addMethod('reject_incoming_transfer', this._handleRejectIncomingTransfer)
+    this._rpc.addMethod('getBalance', this._getBalance)
+    this._rpc.addMethod('_expire', this._expire)
+    this._rpc.addMethod('_get_hash', this._getHash)
+    this._rpc.addMethod('_fund', this._fund)
 
     // public methods bound to generators
+    this.disconnect = co.wrap(this._disconnect).bind(this)
     this.sendTransfer = co.wrap(this._sendTransfer).bind(this)
     this.sendMessage = co.wrap(this._sendMessage).bind(this)
     this.fulfillCondition = co.wrap(this._fulfillCondition).bind(this)
+    this.rejectIncomingTransfer = co.wrap(this._rejectIncomingTransfer).bind(this)
+    this.getFulfillment = co.wrap(this._getFulfillment).bind(this)
     this.receive = co.wrap(this._rpc._receive).bind(this._rpc)
   }
 
@@ -95,6 +107,13 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     ])
   }
 
+  * _getBalance () {
+    return (new BigNumber(yield this._outgoingChannel.getBalance()))
+      .neg()
+      .add(yield this._incomingChannel.getBalance())
+      .toString()
+  }
+
   * _connect () {
     yield this._api.connect()
     yield this._api.connection.request({
@@ -104,7 +123,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     yield this._outgoingChannel.create()
     while (true) { // this will be limited by the timeout in connect
       try {
-        const hash = yield this._rpc.call('get_hash', this._prefix, [])
+        const hash = yield this._rpc.call('_get_hash', this._prefix, [])
         console.log('got hash', hash)
         yield this._incomingChannel.create({ hash })
         break
@@ -115,7 +134,17 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
       // TODO: customize timeout?
       yield wait(5000).catch((e) => {})
     }
+    this._connected = true
     yield this.emitAsync('connect')
+  }
+
+  * _disconnect () {
+    yield this._api.disconnect()
+    this._connected = false
+  }
+
+  isConnected () {
+    return this._connected
   }
 
   getAccount () {
@@ -132,13 +161,22 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     }
   }
 
+  * _fund (hash) {
+    console.log('getting a fund with hash', hash)
+    yield this._incomingChannel.receiveFund(hash)
+    return true
+  }
+
   * _getHash () {
     return this._outgoingChannel.getHash()
   }
 
   * _sendTransfer (rawTransfer) {
-    // TODO: fill in `from`
-    const transfer = Object.assign({ ledger: this._prefix }, rawTransfer)
+    const transfer = Object.assign({
+      from: this.getAccount(),
+      ledger: this._prefix
+    }, rawTransfer)
+
     this._validator.validateOutgoingTransfer(transfer)
     yield this._transfers.storeOutgoing(transfer)
 
@@ -147,6 +185,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     ])
 
     yield this.emitAsync('outgoing_prepare', transfer)
+    yield this._setupExpire(transfer.id, transfer.expiresAt)
   }
 
   * _handleSendTransfer (transfer) {
@@ -155,6 +194,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
     yield this._inFlight.add(transfer.amount)
     yield this.emitAsync('incoming_prepare', transfer)
+    yield this._setupExpire(transfer.id, transfer.expiresAt)
 
     return true
   }
@@ -166,7 +206,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     yield this._transfers.assertAllowedChange(transferId, 'executed')
     const transfer = yield this._transfers.get(transferId)
 
-    this.validateFulfillment(fulfillment, transfer)
+    this._validateFulfillment(fulfillment, transfer)
 
     if (yield this._transfers.fulfill(transferId, fulfillment)) {
       yield this.emitAsync('incoming_fulfill', transfer, fulfillment)
@@ -188,15 +228,41 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     yield this._transfers.assertAllowedChange(transferId, 'executed')
     const transfer = yield this._transfers.get(transferId)
 
+    this._validateFulfillment(fulfillment, transfer)
+
     if (yield this._transfers.fulfill(transferId, fulfillment)) {
-      yield this.emitAsync('outgoing_fulfill', transfer, fulfillment)
       // gets the claim from the outgoing channel
       // TODO: different method name?
       return yield this._outgoingChannel.send(transfer)
     }
   }
 
-  validateFulfillment (fulfillment, transfer) {
+  * _rejectIncomingTransfer () {
+    const transfer = yield this._transfers.get(transferId)
+    debug('going to reject ' + transferId)
+
+    yield this._transfers.assertIncoming(transferId)
+    if (yield this._transfers.cancel(transferId)) {
+      yield this.emitAsync('incoming_reject', transfer, reason)
+    }
+    debug('rejected ' + transferId)
+
+    yield this._balance.sub(transfer.amount)
+    yield this._rpc.call('reject_incoming_transfer', this._prefix, [transferId, reason])
+  }
+
+  * _handleRejectIncomingTransfer (transferId, reason) {
+    const transfer = yield this._transfers.get(transferId)
+
+    yield this._transfers.assertOutgoing(transferId)
+    if (yield this._transfers.cancel(transferId)) {
+      yield this.emitAsync('outgoing_reject', transfer, reason)
+    }
+
+    return true
+  }
+
+  _validateFulfillment (fulfillment, transfer) {
     // TODO: is this crypto condition format? should use five-bells-condition?
     if (base64url(util.sha256(fulfillment)) !== transfer.executionCondition) {
       throw new Errors.NotAcceptedError('fulfillment (' + fulfillment
@@ -216,5 +282,42 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     yield this.emitAsync('incoming_message', message)
 
     return true
+  }
+
+  * _getFulfillment (transferId) {
+    return yield this._transfers.getFulfillment(transferId)
+  }
+
+  * _setupExpire (transferId, expiresAt) {
+    const expiry = Date.parse(expiresAt)
+    const now = new Date()
+
+    const that = this
+    setTimeout(
+      co.wrap(this._expire).bind(this, transferId),
+      (expiry - now))
+  }
+
+  * _expire (transferId) {
+    debug('checking time out on ' + transferId)
+
+    const packaged = yield this._transfers._getPackaged(transferId)
+
+    // don't cancel again if it's already cancelled/executed
+    try {
+      if (!(yield this._transfers.cancel(transferId))) {
+        debug(transferId + ' is already cancelled')
+        return
+      }
+    } catch (e) {
+      debug(e.message)
+      return
+    }
+
+    yield this._inFlight.sub(packaged.transfer.amount)
+    // TODO: should this notify the other side, or should it trust them to expire themself?
+    // yield this._rpc.call('_expire', this._prefix, [transferId]).catch(() => {})
+    yield this.emitAsync((packaged.isIncoming ? 'incoming' : 'outgoing') + '_cancel',
+      packaged.transfer)
   }
 }

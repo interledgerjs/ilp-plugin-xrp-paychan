@@ -6,6 +6,7 @@ const BigNumber = require('bignumber.js')
 const co = require('co')
 const util = require('../util')
 const Balance = require('./balance')
+const EventEmitter2 = require('eventemitter2')
 
 const getClaimMessage = (channelId, amount) => {
   const hashPrefix = Buffer.from('CLM\0', 'ascii')
@@ -17,12 +18,15 @@ const getClaimMessage = (channelId, amount) => {
   ])
 }
 
-module.exports = class OutgoingChannel {
+module.exports = class OutgoingChannel extends EventEmitter2 {
   constructor (opts) {
+    super()
+
     this._api = opts.api
     this._address = opts.address
     this._secret = opts.secret
     this._amount = opts.amount
+    this._fundPercent = new BigNumber('0.8')
     this._destination = opts.destination
     this._store = opts.store
     this._keyPair = nacl.sign.keyPair.fromSeed(util.sha256(opts.channelSecret))
@@ -32,6 +36,11 @@ module.exports = class OutgoingChannel {
       maximum: this._amount,
       store: this._store
     })
+  }
+
+  * getBalance () {
+    if (!this._channelId) throw new Error('must be connected before getBalance')
+    return yield this._balance.get()
   }
 
   * create () {
@@ -74,7 +83,7 @@ module.exports = class OutgoingChannel {
           this._destination,
           ev.transaction.Sequence)
 
-        //console.log('got channel ID:', channelId)
+        console.log('outgoing got channel ID:', channelId)
         this._channelId = channelId
         this._hash = ev.transaction.hash
 
@@ -100,11 +109,14 @@ module.exports = class OutgoingChannel {
       throw new Error('channel has not been created')
     }
 
-    // TODO: maybe this has to re-fund the channel?
-
     // this will complain if the amount exceeds the maximum
     yield this._balance.add(transfer.amount)
     const claim = yield this._balance.get()
+
+    if (this._balance.getMax().mul(this._fundPercent).lt(claim)) {
+      console.log('the new outgoing balance is greater than the threshold')
+      yield this._fundChannel()
+    }
 
     console.log('making claim: ' + claim)
 
@@ -113,5 +125,33 @@ module.exports = class OutgoingChannel {
     const signature = nacl.sign.detached(message, this._keyPair.secretKey)
 
     return Buffer.from(signature).toString('hex')
+  }
+
+  * _fundChannel () {
+    this._balance.addMax(this._amount)
+    const tx = yield this._api.preparePaymentChannelFund(this._address, {
+      channel: this._channelId,
+      amount: this._amount
+    })
+
+    console.log('signing fund tx')
+    const signedTx = this._api.sign(tx.txJSON, this._secret)
+    console.log('submitting signed fund tx')
+    const result = yield this._api.submit(signedTx.signedTransaction)
+    console.log('submitted')
+
+    const that = this
+    function fundCheck (ev) {
+      console.log(ev.transaction.TransactionType)
+      if (ev.transaction.TransactionType !== 'PaymentChannelFund') return
+
+      console.log('got confirm of the fund tx')
+      console.log('\x1b[32mFUND TRANSACTION\x1b[39m', ev.transaction)
+      that._api.connection.removeListener('transaction', fundCheck)
+      console.log('emitting fund')
+      return that.emitAsync('fund', ev.transaction)
+    }
+
+    this._api.connection.on('transaction', fundCheck)
   }
 }
