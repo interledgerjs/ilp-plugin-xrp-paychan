@@ -99,12 +99,12 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
   connect (opts) {
     const timeout = opts && opts.timeout
     const that = this
-    return Promise.race([
-      (co.wrap(this._connect).bind(this))(),
-      wait(timeout).catch((e) => {
-        throw new Error('timed out while connecting to: ' + this._server) 
-      })
-    ])
+    //return Promise.race([
+    return (co.wrap(this._connect).bind(this))()
+      //wait(timeout).catch((e) => {
+        //throw new Error('timed out while connecting to: ' + this._server) 
+      //})
+    //])
   }
 
   * _getBalance () {
