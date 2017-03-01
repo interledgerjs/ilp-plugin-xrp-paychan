@@ -274,7 +274,12 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     }
   }
 
-  * _sendMessage (message) {
+  * _sendMessage (rawMessage) {
+    const message = Object.assign({}, rawMessage)
+    if (message.account) {
+      message.to = message.account
+    }
+
     this._validator.validateOutgoingMessage(message)
     yield this._rpc.call('send_message', this._prefix, [ message ])
     yield this.emitAsync('outgoing_message', message)
