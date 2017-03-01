@@ -177,6 +177,10 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
       ledger: this._prefix
     }, rawTransfer)
 
+    if (transfer.account) {
+      transfer.to = transfer.account
+    }
+
     this._validator.validateOutgoingTransfer(transfer)
     yield this._transfers.storeOutgoing(transfer)
 
