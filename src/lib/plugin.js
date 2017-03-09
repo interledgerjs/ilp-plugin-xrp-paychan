@@ -323,7 +323,10 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
       return
     }
 
-    yield this._inFlight.sub(packaged.transfer.amount)
+    if (packaged.isIncoming) {
+      yield this._inFlight.sub(packaged.transfer.amount)
+    }
+
     // TODO: should this notify the other side, or should it trust them to expire themself?
     // yield this._rpc.call('_expire', this._prefix, [transferId]).catch(() => {})
     yield this.emitAsync((packaged.isIncoming ? 'incoming' : 'outgoing') + '_cancel',
