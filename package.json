@@ -13,7 +13,7 @@
     "bignum": "^0.12.5",
     "co-request": "^1.0.0",
     "eventemitter2": "^3.0.1",
-    "ripple-lib": "ripple/ripple-lib#feat/bs-paychan",
+    "ripple-lib": "^0.17.6",
     "tweetnacl": "^0.14.5"
   },
   "devDependencies": {
