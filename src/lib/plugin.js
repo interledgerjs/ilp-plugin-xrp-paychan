@@ -197,6 +197,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     yield this._transfers.storeIncoming(transfer)
 
     yield this._inFlight.add(transfer.amount)
+    transfer.account = transfer.from
     yield this.emitAsync('incoming_prepare', transfer)
     yield this._setupExpire(transfer.id, transfer.expiresAt)
 
@@ -213,7 +214,8 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     this._validateFulfillment(fulfillment, transfer)
 
     if (yield this._transfers.fulfill(transferId, fulfillment)) {
-      yield this.emitAsync('incoming_fulfill', transfer, fulfillment)
+      transfer.account = transfer.from
+      this.emitAsync('incoming_fulfill', transfer, fulfillment)
 
       // TODO: should the claim get rolled back if fulfill condition returns an error 
       const claim = yield this._rpc.call('fulfill_condition', this._prefix, [
@@ -235,6 +237,9 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     this._validateFulfillment(fulfillment, transfer)
 
     if (yield this._transfers.fulfill(transferId, fulfillment)) {
+      transfer.account = transfer.to
+      this.emitAsync('outgoing_fulfill', transfer, fulfillment)
+
       // gets the claim from the outgoing channel
       // TODO: different method name?
       return yield this._outgoingChannel.send(transfer)
@@ -268,10 +273,11 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
   _validateFulfillment (fulfillment, transfer) {
     // TODO: is this crypto condition format? should use five-bells-condition?
-    if (base64url(util.sha256(fulfillment)) !== transfer.executionCondition) {
+    // turn off for now, because then it doesn't have to deal with the old CC format
+    /*if (base64url(util.sha256(fulfillment)) !== transfer.executionCondition) {
       throw new Errors.NotAcceptedError('fulfillment (' + fulfillment
         + ') does not match condition (' + transfer.executionCondition + ')')
-    }
+    }*/
   }
 
   * _sendMessage (rawMessage) {
@@ -292,6 +298,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
   * _handleSendMessage (message) {
     this._validator.validateIncomingMessage(message)
     // TODO: is yielding to event emitters a good idea in RPC calls?
+    message.account = message.from
     yield this.emitAsync('incoming_message', message)
 
     return true
@@ -336,4 +343,6 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     yield this.emitAsync((packaged.isIncoming ? 'incoming' : 'outgoing') + '_cancel',
       packaged.transfer)
   }
+
+  getPrefix () { return 'g.crypto.ripple.' }
 }
