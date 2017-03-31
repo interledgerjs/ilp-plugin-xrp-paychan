@@ -275,7 +275,11 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
   }
 
   * _sendMessage (rawMessage) {
-    const message = Object.assign({}, rawMessage)
+    const message = Object.assign({
+      from: this.getAccount(),
+      ledger: this._prefix
+    }, rawMessage)
+
     if (message.account) {
       message.to = message.account
     }
