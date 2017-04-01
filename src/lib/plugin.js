@@ -12,6 +12,7 @@ const Balance = require('./balance')
 const OutgoingChannel = require('./outgoing-channel')
 const IncomingChannel = require('./incoming-channel')
 const TransferLog = require('./transferlog')
+const debug = require('debug')('ilp-plugin-xrp-paychan')
 
 const wait = (timeout) => (new Promise((resolve, reject) => {
   if (!timeout) return
@@ -135,7 +136,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
       yield wait(5000).catch((e) => {})
     }
     this._connected = true
-    yield this.emitAsync('connect')
+    this.emitAsync('connect')
   }
 
   * _disconnect () {
@@ -183,22 +184,24 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
     this._validator.validateOutgoingTransfer(transfer)
     yield this._transfers.storeOutgoing(transfer)
+    debug('PAYCHAN send transfer:', transfer)
 
     yield this._rpc.call('send_transfer', this._prefix, [
-      Object.assign(transfer, { noteToSelf: undefined }),
+      Object.assign({}, transfer, { noteToSelf: undefined }),
     ])
 
-    yield this.emitAsync('outgoing_prepare', transfer)
+    this.emitAsync('outgoing_prepare', transfer)
     yield this._setupExpire(transfer.id, transfer.expiresAt)
   }
 
   * _handleSendTransfer (transfer) {
     this._validator.validateIncomingTransfer(transfer)
     yield this._transfers.storeIncoming(transfer)
+    debug('PAYCHAN incoming transfer:', transfer)
 
     yield this._inFlight.add(transfer.amount)
     transfer.account = transfer.from
-    yield this.emitAsync('incoming_prepare', transfer)
+    this.emitAsync('incoming_prepare', transfer)
     yield this._setupExpire(transfer.id, transfer.expiresAt)
 
     return true
@@ -210,6 +213,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     yield this._transfers.assertIncoming(transferId)
     yield this._transfers.assertAllowedChange(transferId, 'executed')
     const transfer = yield this._transfers.get(transferId)
+    debug('PAYCHAN fulfilled incoming transfer:', transfer)
 
     this._validateFulfillment(fulfillment, transfer)
 
@@ -233,6 +237,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     yield this._transfers.assertOutgoing(transferId)
     yield this._transfers.assertAllowedChange(transferId, 'executed')
     const transfer = yield this._transfers.get(transferId)
+    debug('PAYCHAN fulfilled outgoing transfer:', transfer)
 
     this._validateFulfillment(fulfillment, transfer)
 
@@ -252,7 +257,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
     yield this._transfers.assertIncoming(transferId)
     if (yield this._transfers.cancel(transferId)) {
-      yield this.emitAsync('incoming_reject', transfer, reason)
+      this.emitAsync('incoming_reject', transfer, reason)
     }
     debug('rejected ' + transferId)
 
@@ -265,7 +270,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
     yield this._transfers.assertOutgoing(transferId)
     if (yield this._transfers.cancel(transferId)) {
-      yield this.emitAsync('outgoing_reject', transfer, reason)
+      this.emitAsync('outgoing_reject', transfer, reason)
     }
 
     return true
@@ -292,14 +297,14 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
     this._validator.validateOutgoingMessage(message)
     yield this._rpc.call('send_message', this._prefix, [ message ])
-    yield this.emitAsync('outgoing_message', message)
+    this.emitAsync('outgoing_message', message)
   }
 
   * _handleSendMessage (message) {
     this._validator.validateIncomingMessage(message)
     // TODO: is yielding to event emitters a good idea in RPC calls?
     message.account = message.from
-    yield this.emitAsync('incoming_message', message)
+    this.emitAsync('incoming_message', message)
 
     return true
   }
@@ -340,7 +345,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
     // TODO: should this notify the other side, or should it trust them to expire themself?
     // yield this._rpc.call('_expire', this._prefix, [transferId]).catch(() => {})
-    yield this.emitAsync((packaged.isIncoming ? 'incoming' : 'outgoing') + '_cancel',
+    this.emitAsync((packaged.isIncoming ? 'incoming' : 'outgoing') + '_cancel',
       packaged.transfer)
   }
 
