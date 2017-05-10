@@ -14,13 +14,6 @@ const IncomingChannel = require('./incoming-channel')
 const TransferLog = require('./transferlog')
 const debug = require('debug')('ilp-plugin-xrp-paychan')
 
-const wait = (timeout) => (new Promise((resolve, reject) => {
-  if (!timeout) return
-  setTimeout(() => {
-    if (timeout) reject(new Error('timed out'))
-  }, timeout)
-}))
-
 module.exports = class PluginXrpPaychan extends EventEmitter2 {
   constructor (opts) {
     super()
@@ -32,11 +25,12 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     this._peerAddress = opts.peerAddress
     this._rpcUri = opts.rpcUri
     this._store = opts._store
-    // TODO: optional param? if so, default?
     this._maxInFlight = opts.maxInFlight
     this._channelAmount = opts.channelAmount
-    // TODO: address-pair-specific prefix like plugin virtual
-    this._prefix = 'g.crypto.ripple.'
+    this._prefix = 'g.crypto.ripple.paychan.' +
+      ((this._address < this._peerAddress)
+        ? this._address + '~' + this._peerAddress
+        : this._peerAddress + '~' + this._address) + '.'
 
     this._validator = new Validator({
       account: this._prefix + this._address,
@@ -88,6 +82,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     this._rpc.addMethod('_fund', this._fund)
 
     // public methods bound to generators
+    this.connect = co.wrap(this._connect).bind(this)
     this.disconnect = co.wrap(this._disconnect).bind(this)
     this.sendTransfer = co.wrap(this._sendTransfer).bind(this)
     this.sendMessage = co.wrap(this._sendMessage).bind(this)
@@ -95,17 +90,6 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     this.rejectIncomingTransfer = co.wrap(this._rejectIncomingTransfer).bind(this)
     this.getFulfillment = co.wrap(this._getFulfillment).bind(this)
     this.receive = co.wrap(this._rpc._receive).bind(this._rpc)
-  }
-
-  connect (opts) {
-    const timeout = opts && opts.timeout
-    const that = this
-    //return Promise.race([
-    return (co.wrap(this._connect).bind(this))()
-      //wait(timeout).catch((e) => {
-        //throw new Error('timed out while connecting to: ' + this._server) 
-      //})
-    //])
   }
 
   * _getBalance () {
@@ -116,24 +100,24 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
   }
 
   * _connect () {
+    // because connecting this plugin can take a long time, the options timeout
+    // is disregarded.
     yield this._api.connect()
     yield this._api.connection.request({
       command: 'subscribe',
       accounts: [ this._address ]
     })
     yield this._outgoingChannel.create()
-    while (true) { // this will be limited by the timeout in connect
+    while (true) {
       try {
         const hash = yield this._rpc.call('_get_hash', this._prefix, [])
-        console.log('got hash', hash)
+        debug('got peer payment channel fund tx with hash:', hash)
         yield this._incomingChannel.create({ hash })
         break
       } catch (e) {
-        // TODO: use debug
-        console.error(e)
+        if (!e.message.startsWith('Unexpected status code 2')) throw e
       }
-      // TODO: customize timeout?
-      yield wait(5000).catch((e) => {})
+      yield util.wait(5000).catch(() => {})
     }
     this._connected = true
     this.emitAsync('connect')
@@ -163,8 +147,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
   }
 
   * _fund (hash) {
-    console.log('getting a fund with hash', hash)
-    yield this._incomingChannel.receiveFund(hash)
+    debug('notified of fund tx with hash:', hash)
     return true
   }
 
@@ -184,7 +167,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
     this._validator.validateOutgoingTransfer(transfer)
     yield this._transfers.storeOutgoing(transfer)
-    debug('PAYCHAN send transfer:', transfer)
+    debug('sending transfer:', transfer)
 
     yield this._rpc.call('send_transfer', this._prefix, [
       Object.assign({}, transfer, { noteToSelf: undefined }),
@@ -197,7 +180,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
   * _handleSendTransfer (transfer) {
     this._validator.validateIncomingTransfer(transfer)
     yield this._transfers.storeIncoming(transfer)
-    debug('PAYCHAN incoming transfer:', transfer)
+    debug('notified of incoming transfer:', transfer)
 
     yield this._inFlight.add(transfer.amount)
     transfer.account = transfer.from
@@ -213,7 +196,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     yield this._transfers.assertIncoming(transferId)
     yield this._transfers.assertAllowedChange(transferId, 'executed')
     const transfer = yield this._transfers.get(transferId)
-    debug('PAYCHAN fulfilled incoming transfer:', transfer)
+    debug('fulfilled incoming transfer:', transfer)
 
     this._validateFulfillment(fulfillment, transfer)
 
@@ -221,7 +204,6 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
       transfer.account = transfer.from
       this.emitAsync('incoming_fulfill', transfer, fulfillment)
 
-      // TODO: should the claim get rolled back if fulfill condition returns an error 
       const claim = yield this._rpc.call('fulfill_condition', this._prefix, [
         transferId, fulfillment
       ])
@@ -237,7 +219,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     yield this._transfers.assertOutgoing(transferId)
     yield this._transfers.assertAllowedChange(transferId, 'executed')
     const transfer = yield this._transfers.get(transferId)
-    debug('PAYCHAN fulfilled outgoing transfer:', transfer)
+    debug('outgoing transfer fulfilled by peer:', transfer)
 
     this._validateFulfillment(fulfillment, transfer)
 
@@ -246,20 +228,19 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
       this.emitAsync('outgoing_fulfill', transfer, fulfillment)
 
       // gets the claim from the outgoing channel
-      // TODO: different method name?
       return yield this._outgoingChannel.send(transfer)
     }
   }
 
-  * _rejectIncomingTransfer () {
+  * _rejectIncomingTransfer (transferId, reason) {
     const transfer = yield this._transfers.get(transferId)
-    debug('going to reject ' + transferId)
+    debug('rejecting incoming transfer:', transferId, reason)
 
     yield this._transfers.assertIncoming(transferId)
     if (yield this._transfers.cancel(transferId)) {
       this.emitAsync('incoming_reject', transfer, reason)
     }
-    debug('rejected ' + transferId)
+    debug('rejected:', transferId)
 
     yield this._balance.sub(transfer.amount)
     yield this._rpc.call('reject_incoming_transfer', this._prefix, [transferId, reason])
@@ -277,12 +258,10 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
   }
 
   _validateFulfillment (fulfillment, transfer) {
-    // TODO: is this crypto condition format? should use five-bells-condition?
-    // turn off for now, because then it doesn't have to deal with the old CC format
-    /*if (base64url(util.sha256(fulfillment)) !== transfer.executionCondition) {
-      throw new Errors.NotAcceptedError('fulfillment (' + fulfillment
-        + ') does not match condition (' + transfer.executionCondition + ')')
-    }*/
+    if (base64url(util.sha256(fulfillment)) !== transfer.executionCondition) {
+      throw new Errors.NotAcceptedError('fulfillment (', fulfillment,
+        ') does not match condition (', transfer.executionCondition, ')')
+    }
   }
 
   * _sendMessage (rawMessage) {
@@ -324,7 +303,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
   }
 
   * _expire (transferId) {
-    debug('checking time out on ' + transferId)
+    debug('checking expiry of:', transferId)
 
     const packaged = yield this._transfers._getPackaged(transferId)
 
@@ -343,11 +322,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
       yield this._inFlight.sub(packaged.transfer.amount)
     }
 
-    // TODO: should this notify the other side, or should it trust them to expire themself?
-    // yield this._rpc.call('_expire', this._prefix, [transferId]).catch(() => {})
     this.emitAsync((packaged.isIncoming ? 'incoming' : 'outgoing') + '_cancel',
       packaged.transfer)
   }
-
-  getPrefix () { return 'g.crypto.ripple.' }
 }
