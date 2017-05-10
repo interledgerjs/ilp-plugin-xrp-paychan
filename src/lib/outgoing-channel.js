@@ -7,16 +7,8 @@ const co = require('co')
 const util = require('../util')
 const Balance = require('./balance')
 const EventEmitter2 = require('eventemitter2')
-
-const getClaimMessage = (channelId, amount) => {
-  const hashPrefix = Buffer.from('CLM\0', 'ascii')
-  const idBuffer = Buffer.from(channelId, 'hex')
-  const amountBuffer = util.toBuffer(new BigNumber(amount).mul('1000000'), 8)
-
-  return Buffer.concat([
-    hashPrefix, idBuffer, amountBuffer
-  ])
-}
+const encode = require('../util/encode')
+const debug = require('debug')('ilp-plugin-xrp-paychan:outgoing-channel')
 
 module.exports = class OutgoingChannel extends EventEmitter2 {
   constructor (opts) {
@@ -52,7 +44,7 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
 
     const txTag = util.randomTag()
     const tx = yield this._api.preparePaymentChannelCreate(this._address, {
-      amount: this._amount,
+      amount: util.dropsToXrp(this._amount),
       destination: this._destination,
       settleDelay: 90000,
       publicKey: 'ED' + Buffer.from(this._keyPair.publicKey).toString('hex').toUpperCase(),
@@ -60,39 +52,34 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
       // TODO: specify a cancelAfter?
     })
 
-    console.log('PUBLIC KEY:', Buffer.from(this._keyPair.publicKey).toString('hex').toUpperCase())
     const signedTx = this._api.sign(tx.txJSON, this._secret)
     const result = yield this._api.submit(signedTx.signedTransaction)
 
-    /*console.log('submitted transaction:', result)
-    console.log('source tag:', txTag)*/
-
     return new Promise((resolve) => {
-      // TODO: remove this listener
-      this._api.connection.on('transaction', (ev) => {
-        /*console.log('got event:', ev)
-        console.log('tags are:', ev.transaction.SourceTag, txTag)*/
+      function handleTransaction (ev) {
         if (ev.transaction.SourceTag !== txTag) return
-        //console.log('got the right source tag')
-        // if the source tags somehow match up
         if (ev.transaction.Account !== this._address) return
-        //console.log('trying to create channel ID now')
 
         const channelId = util.channelId(
           this._address,
           this._destination,
           ev.transaction.Sequence)
 
-        console.log('outgoing got channel ID:', channelId)
+        debug('created outgoing channel with ID:', channelId)
         this._channelId = channelId
         this._hash = ev.transaction.hash
 
         this._store.put('channel_o', channelId)
           .then(() => resolve())
           .catch((e) => {
-            console.error(e)
+            debug('store error:', e)
           })
-      })
+
+        setImmediate(() => this._api.connection
+          .removeListener('transaction', handleTransaction))
+      }
+
+      this._api.connection.on('transaction', handleTransaction.bind(this))
     })
   }
 
@@ -112,16 +99,16 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
     // this will complain if the amount exceeds the maximum
     yield this._balance.add(transfer.amount)
     const claim = yield this._balance.get()
+    const threshold = this._balance.getMax().mul(this._fundPercent)
 
-    if (this._balance.getMax().mul(this._fundPercent).lt(claim)) {
-      console.log('the new outgoing balance is greater than the threshold')
+    if (threshold.lt(claim)) {
+      debug('balance of', claim.toString(), 'exceeds threshold',
+        threshold.toString(), '. triggering fund tx.')
       yield this._fundChannel()
     }
 
-    console.log('making claim: ' + claim)
-
-    const message = getClaimMessage(this._channelId, claim)
-    console.log('made claim:', message)
+    debug('creating outgoing claim for new balance:', claim.toString())
+    const message = encode.getClaimMessage(this._channelId, claim)
     const signature = nacl.sign.detached(message, this._keyPair.secretKey)
 
     return Buffer.from(signature).toString('hex')
@@ -131,24 +118,19 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
     this._balance.addMax(this._amount)
     const tx = yield this._api.preparePaymentChannelFund(this._address, {
       channel: this._channelId,
-      amount: this._amount
+      amount: util.dropsToXrp(this._amount)
     })
 
-    console.log('signing fund tx')
     const signedTx = this._api.sign(tx.txJSON, this._secret)
-    console.log('submitting signed fund tx')
+    debug('submitting fund tx for an additional:', this._amount)
     const result = yield this._api.submit(signedTx.signedTransaction)
-    console.log('submitted')
 
     const that = this
     function fundCheck (ev) {
-      console.log(ev.transaction.TransactionType)
       if (ev.transaction.TransactionType !== 'PaymentChannelFund') return
 
-      console.log('got confirm of the fund tx')
-      console.log('\x1b[32mFUND TRANSACTION\x1b[39m', ev.transaction)
+      debug('fund tx completed')
       that._api.connection.removeListener('transaction', fundCheck)
-      console.log('emitting fund')
       return that.emitAsync('fund', ev.transaction)
     }
 

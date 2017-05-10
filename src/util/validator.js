@@ -26,9 +26,14 @@ module.exports = class Validator {
     assert(t.ledger, 'must have a ledger')
     assert(t.amount, 'must have an amount')
 
+    if (t.executionCondition || t.expiresAt) {
+      assert(t.executionCondition, 'must have executionCondition if expiresAt is defined')
+      assert(t.expiresAt, 'must have expiresAt if executionCondition is defined')
+    }
+
     assertString(t.id, 'id')
     assertNumber(t.amount, 'amount')
-    assertObject(t.data, 'data')
+    assertString(t.ilp, 'ilp')
     assertObject(t.noteToSelf, 'noteToSelf')
     assertObject(t.custom, 'custom')
     assertCondition(t.executionCondition, 'executionCondition')
