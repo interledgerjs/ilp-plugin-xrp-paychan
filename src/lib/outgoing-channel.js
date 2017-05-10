@@ -38,7 +38,9 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
   * create () {
     const existingChannel = yield this._store.get('channel_o')
     if (existingChannel) {
+      debug('fetching existing channel id', existingChannel, 'and returning.')
       this._channelId = existingChannel
+      this._hash = yield this._store.get('hash_o')
       return
     }
 
@@ -70,6 +72,7 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
         this._hash = ev.transaction.hash
 
         this._store.put('channel_o', channelId)
+          .then(() => this._store.put('hash_o', this._hash))
           .then(() => resolve())
           .catch((e) => {
             debug('store error:', e)

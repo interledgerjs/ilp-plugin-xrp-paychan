@@ -33,6 +33,8 @@ module.exports = class IncomingChannel {
   * create ({ hash }) {
     // fetches details from the network to initialize
     this._hash = hash
+    yield this._store.put('hash_i', hash)
+
     this._tx = yield this._api.connection.request({
       command: 'tx',
       transaction: this._hash
