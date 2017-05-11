@@ -95,6 +95,16 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     this.isAuthorized = () => true
   }
 
+  // don't throw errors even if the event handler throws.
+  // errors can prevent the balance from being updated correctly.
+  _safeEmit () {
+    try {
+      this.emit.apply(this, arguments)
+    } catch (err) {
+      debug('error in handler for event', arguments, err)
+    }
+  }
+
   * _getBalance () {
     return (new BigNumber(yield this._outgoingChannel.getBalance()))
       .neg()
@@ -103,6 +113,8 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
   }
 
   * _connect () {
+    debug('connecting to ripple API')
+
     // because connecting this plugin can take a long time, the options timeout
     // is disregarded.
     yield this._api.connect()
@@ -129,7 +141,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     yield this._incomingChannel.create({ hash })
 
     this._connected = true
-    this.emitAsync('connect')
+    this._safeEmit('connect')
   }
 
   * _disconnect () {
@@ -182,7 +194,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
       Object.assign({}, transfer, { noteToSelf: undefined }),
     ])
 
-    this.emitAsync('outgoing_prepare', transfer)
+    this._safeEmit('outgoing_prepare', transfer)
     yield this._setupExpire(transfer.id, transfer.expiresAt)
   }
 
@@ -194,7 +206,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     debug('adding', transfer.amount, 'to in-flight for receive prepare')
     yield this._inFlight.add(transfer.amount)
     transfer.account = transfer.from
-    this.emitAsync('incoming_prepare', transfer)
+    this._safeEmit('incoming_prepare', transfer)
     yield this._setupExpire(transfer.id, transfer.expiresAt)
 
     return true
@@ -213,7 +225,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
     if (yield this._transfers.fulfill(transferId, fulfillment)) {
       transfer.account = transfer.from
-      this.emitAsync('incoming_fulfill', transfer, fulfillment)
+      this._safeEmit('incoming_fulfill', transfer, fulfillment)
 
       debug('requesting claim from peer')
       const claim = yield this._rpc.call('fulfill_condition', this._prefix, [
@@ -241,7 +253,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
     if (yield this._transfers.fulfill(transferId, fulfillment)) {
       transfer.account = transfer.to
-      this.emitAsync('outgoing_fulfill', transfer, fulfillment)
+      this._safeEmit('outgoing_fulfill', transfer, fulfillment)
 
       // gets the claim from the outgoing channel
       return yield this._outgoingChannel.send(transfer)
@@ -254,7 +266,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
     yield this._transfers.assertIncoming(transferId)
     if (yield this._transfers.cancel(transferId)) {
-      this.emitAsync('incoming_reject', transfer, reason)
+      this._safeEmit('incoming_reject', transfer, reason)
     }
     debug('rejected:', transferId)
 
@@ -268,7 +280,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
     yield this._transfers.assertOutgoing(transferId)
     if (yield this._transfers.cancel(transferId)) {
-      this.emitAsync('outgoing_reject', transfer, reason)
+      this._safeEmit('outgoing_reject', transfer, reason)
     }
 
     return true
@@ -296,14 +308,14 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
     this._validator.validateOutgoingMessage(message)
     yield this._rpc.call('send_message', this._prefix, [ message ])
-    this.emitAsync('outgoing_message', message)
+    this._safeEmit('outgoing_message', message)
   }
 
   * _handleSendMessage (message) {
     this._validator.validateIncomingMessage(message)
     // TODO: is yielding to event emitters a good idea in RPC calls?
     message.account = message.from
-    this.emitAsync('incoming_message', message)
+    this._safeEmit('incoming_message', message)
 
     return true
   }
@@ -343,7 +355,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
       yield this._inFlight.sub(packaged.transfer.amount)
     }
 
-    this.emitAsync((packaged.isIncoming ? 'incoming' : 'outgoing') + '_cancel',
+    this._safeEmit((packaged.isIncoming ? 'incoming' : 'outgoing') + '_cancel',
       packaged.transfer)
   }
 }

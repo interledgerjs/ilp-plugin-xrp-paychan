@@ -50,6 +50,7 @@ module.exports = class HttpRpc extends EventEmitter {
         result.body + '"')
     }
 
+    debug(method, 'got result:', result.body)
     return result.body
   }
 }
