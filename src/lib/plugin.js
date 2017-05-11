@@ -159,6 +159,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
   }
 
   * _getHash () {
+    debug('incoming request for hash')
     return this._outgoingChannel.getHash()
   }
 
