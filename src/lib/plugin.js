@@ -118,7 +118,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     while (!hash) {
       try {
         hash = yield this._rpc.call('_get_hash', this._prefix, [ 'get_hash' ])
-        debug('got peer payment channel fund tx with hash:', hash)
+        debug('got peer payment channel create tx with hash:', hash)
       } catch (e) {
         debug('get hash failed:', e.message)
       }
@@ -207,22 +207,27 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     debug('fulfilled incoming transfer:', transfer)
 
     this._validateFulfillment(fulfillment, transfer)
+    debug('validated fulfillment')
 
     if (yield this._transfers.fulfill(transferId, fulfillment)) {
       transfer.account = transfer.from
       this.emitAsync('incoming_fulfill', transfer, fulfillment)
 
+      debug('requesting claim from peer')
       const claim = yield this._rpc.call('fulfill_condition', this._prefix, [
         transferId, fulfillment
       ])
 
+      debug('receive claim from peer:', claim)
       yield this._incomingChannel.receive(transfer, claim)
       yield this._inFlight.sub(transfer.amount)
     }
   }
 
   * _handleFulfillCondition (transferId, fulfillment, claim) {
+    debug('validating fulfillment request for', transferId)
     this._validator.validateFulfillment(fulfillment)
+    debug('fulfillment validated', transferId)
 
     yield this._transfers.assertOutgoing(transferId)
     yield this._transfers.assertAllowedChange(transferId, 'executed')
