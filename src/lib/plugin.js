@@ -150,10 +150,9 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
   getInfo () {
     return {
       prefix: this._prefix,
-      scale: 6,
-      precision: 12,
-      currencySymbol: 'XRP',
-      currencyCode: 'XRP'
+      currencyScale: 6,
+      currencyCode: 'XRP',
+      connectors: [ this._prefix + this._peerAddress ]
     }
   }
 
