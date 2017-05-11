@@ -117,7 +117,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     if (hash) debug('got incoming channel tx hash from store:', hash)
     while (!hash) {
       try {
-        hash = yield this._rpc.call('_get_hash', this._prefix, [])
+        hash = yield this._rpc.call('_get_hash', this._prefix, [ 'get_hash' ])
         debug('got peer payment channel fund tx with hash:', hash)
       } catch (e) {
         debug('get hash failed:', e.message)
