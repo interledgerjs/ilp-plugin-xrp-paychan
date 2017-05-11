@@ -112,24 +112,21 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     yield this._outgoingChannel.create()
 
     // we need the RPC to start up before this promise will work
-    function * connectIncomingChannel () {
-      let hash = yield this._store.get('hash_i')
+    let hash = yield this._store.get('hash_i')
 
-      if (hash) debug('got incoming channel tx hash from store:', hash)
-      while (!hash) {
-        try {
-          hash = yield this._rpc.call('_get_hash', this._prefix, [])
-          debug('got peer payment channel fund tx with hash:', hash)
-        } catch (e) {
-          debug('get hash failed:', e.message)
-        }
-        yield util.wait(5000).catch(() => {})
+    if (hash) debug('got incoming channel tx hash from store:', hash)
+    while (!hash) {
+      try {
+        hash = yield this._rpc.call('_get_hash', this._prefix, [])
+        debug('got peer payment channel fund tx with hash:', hash)
+      } catch (e) {
+        debug('get hash failed:', e.message)
       }
-
-      yield this._incomingChannel.create({ hash })
+      yield util.wait(5000).catch(() => {})
     }
 
-    this._connectPromise = co.wrap(connectIncomingChannel).call(this)
+    yield this._incomingChannel.create({ hash })
+
     this._connected = true
     this.emitAsync('connect')
   }
