@@ -14,6 +14,7 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
   constructor (opts) {
     super()
 
+    this._increment = 1
     this._api = opts.api
     this._address = opts.address
     this._secret = opts.secret
@@ -126,7 +127,7 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
     this._balance.addMax(this._amount)
     const tx = yield this._api.preparePaymentChannelFund(this._address, {
       channel: this._channelId,
-      amount: util.dropsToXrp(this._amount)
+      amount: util.dropsToXrp(this._amount * (++this._increment))
     })
 
     const signedTx = this._api.sign(tx.txJSON, this._secret)
@@ -137,7 +138,7 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
     function fundCheck (ev) {
       if (ev.transaction.TransactionType !== 'PaymentChannelFund') return
 
-      debug('fund tx completed')
+      debug('fund tx completed:', ev)
       that._api.connection.removeListener('transaction', fundCheck)
       return that.emitAsync('fund', ev.transaction)
     }
