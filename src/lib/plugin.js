@@ -1,6 +1,7 @@
 'use strict'
 
 const Validator = require('../util/validator')
+const crypto = require('crypto')
 const EventEmitter2 = require('eventemitter2')
 const base64url = require('base64url')
 const HttpRPC = require('./rpc')
@@ -271,7 +272,10 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
   }
 
   _validateFulfillment (fulfillment, transfer) {
-    if (base64url(util.sha256(fulfillment)) !== transfer.executionCondition) {
+    const preimage = Buffer.from(fulfillment, 'base64')
+    const hash = crypto.createHash('sha256').update(preimage).digest()
+
+    if (base64url(hash) !== transfer.executionCondition) {
       throw new Errors.NotAcceptedError('fulfillment (', fulfillment,
         ') does not match condition (', transfer.executionCondition, ')')
     }
