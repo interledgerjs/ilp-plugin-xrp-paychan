@@ -121,7 +121,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
           hash = yield this._rpc.call('_get_hash', this._prefix, [])
           debug('got peer payment channel fund tx with hash:', hash)
         } catch (e) {
-          if (!e.message.startsWith('Unexpected status code 2')) throw e
+          debug('get hash failed:', e.message)
         }
         yield util.wait(5000).catch(() => {})
       }
