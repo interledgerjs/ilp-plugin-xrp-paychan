@@ -109,7 +109,10 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
     if (threshold.lt(claim)) {
       debug('balance of', claim.toString(), 'exceeds threshold',
         threshold.toString(), '. triggering fund tx.')
-      yield this._fundChannel()
+      yield co.wrap(this._fundChannel).call(this).catch((e) => {
+        console.error(e)
+        throw e
+      })
     }
 
     debug('creating outgoing claim for new balance:', claim.toString())

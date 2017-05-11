@@ -102,7 +102,10 @@ module.exports = class IncomingChannel {
       debug('new balance', newBalance.toString(),
         'exceeds threshold', threshold.toString(),
         '. submitting claim tx.')
-      yield this._claimFunds()
+      yield this._claimFunds().catch((e) => {
+        console.error(e)
+        throw e
+      })
       //co(this._claimFunds.bind(this))
     }
   }
