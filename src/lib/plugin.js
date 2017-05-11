@@ -91,6 +91,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     this.rejectIncomingTransfer = co.wrap(this._rejectIncomingTransfer).bind(this)
     this.getFulfillment = co.wrap(this._getFulfillment).bind(this)
     this.receive = co.wrap(this._rpc._receive).bind(this._rpc)
+    this.isAuthorized = () => true
   }
 
   * _getBalance () {

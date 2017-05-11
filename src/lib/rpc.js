@@ -35,6 +35,7 @@ module.exports = class HttpRpc extends EventEmitter {
         method: 'POST',
         uri: uri,
         body: params,
+        auth: { bearer: 'let-me-in' },
         json: true
       }),
       new Promise((resolve, reject) => {
