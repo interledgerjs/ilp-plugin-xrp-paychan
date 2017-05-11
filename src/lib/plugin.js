@@ -191,6 +191,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     yield this._transfers.storeIncoming(transfer)
     debug('notified of incoming transfer:', transfer)
 
+    debug('adding', transfer.amount, 'to in-flight for receive prepare')
     yield this._inFlight.add(transfer.amount)
     transfer.account = transfer.from
     this.emitAsync('incoming_prepare', transfer)
@@ -221,6 +222,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
       debug('receive claim from peer:', claim)
       yield this._incomingChannel.receive(transfer, claim)
+      debug('subtracting', transfer.amount, 'from in-flight for fulfill')
       yield this._inFlight.sub(transfer.amount)
     }
   }
@@ -256,7 +258,8 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     }
     debug('rejected:', transferId)
 
-    yield this._balance.sub(transfer.amount)
+    debug('subtracting', transfer.amount, 'from in-flight for reject')
+    yield this._inFlight.sub(transfer.amount)
     yield this._rpc.call('reject_incoming_transfer', this._prefix, [transferId, reason])
   }
 
@@ -336,6 +339,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     }
 
     if (packaged.isIncoming) {
+      debug('subtracting', transfer.amount, 'from in-flight for expiry')
       yield this._inFlight.sub(packaged.transfer.amount)
     }
 
