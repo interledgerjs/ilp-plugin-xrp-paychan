@@ -41,6 +41,7 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
       debug('fetching existing channel id', existingChannel, 'and returning.')
       this._channelId = existingChannel
       this._hash = yield this._store.get('hash_o')
+      debug('fetching stored hash', this._hash)
       return
     }
 
@@ -91,6 +92,7 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
   }
 
   getHash () {
+    debug('fetching hash', this._hash)
     return this._hash
   }
 
