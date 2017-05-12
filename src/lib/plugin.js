@@ -168,6 +168,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
 
   * _fund (hash) {
     debug('notified of fund tx with hash:', hash)
+    yield this._incomingChannel.receiveFund(hash)
     return true
   }
 
