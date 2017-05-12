@@ -79,7 +79,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     this._rpc.addMethod('fulfill_condition', this._handleFulfillCondition)
     this._rpc.addMethod('reject_incoming_transfer', this._handleRejectIncomingTransfer)
     this._rpc.addMethod('_expire', this._expire)
-    this._rpc.addMethod('_get_hash', this._getHash)
+    this._rpc.addMethod('_get_channel', this._getChannel)
     this._rpc.addMethod('_fund', this._fund)
 
     // public methods bound to generators
@@ -125,20 +125,20 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     yield this._outgoingChannel.create()
 
     // we need the RPC to start up before this promise will work
-    let hash = yield this._store.get('hash_i')
+    let incomingChannel = yield this._store.get('channel_i')
 
-    if (hash) debug('got incoming channel tx hash from store:', hash)
-    while (!hash) {
+    if (incomingChannel) debug('got incoming channel from store:', incomingChannel)
+    while (!incomingChannel) {
       try {
-        hash = yield this._rpc.call('_get_hash', this._prefix, [ 'get_hash' ])
-        debug('got peer payment channel create tx with hash:', hash)
+        incomingChannel = yield this._rpc.call('_get_channel', this._prefix, [ 'get_channel' ])
+        debug('got peer payment channel:', incomingChannel)
       } catch (e) {
-        debug('get hash failed:', e.message)
+        debug('get channel failed:', e.message)
       }
       yield util.wait(5000).catch(() => {})
     }
 
-    yield this._incomingChannel.create({ hash })
+    yield this._incomingChannel.create({ channelId: incomingChannel })
 
     this._connected = true
     this._safeEmit('connect')
@@ -166,15 +166,15 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     }
   }
 
-  * _fund (hash) {
-    debug('notified of fund tx with hash:', hash)
-    yield this._incomingChannel.receiveFund(hash)
+  * _fund () {
+    debug('notified of fund tx. reloading channel details')
+    yield this._incomingChannel.reloadChannelDetails()
     return true
   }
 
-  * _getHash () {
-    debug('incoming request for hash')
-    return this._outgoingChannel.getHash()
+  * _getChannel () {
+    debug('incoming request for channel')
+    return this._outgoingChannel.getChannelId()
   }
 
   * _sendTransfer (rawTransfer) {

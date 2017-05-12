@@ -21,7 +21,6 @@ module.exports = class IncomingChannel {
     // TODO: stop hardcoding this
     this._settlePercent = new BigNumber('0.8')
 
-    // TODO: get this channel by the transaction hash?
     // TODO: how to listen for the channel's pending expiry
   }
 
@@ -30,28 +29,19 @@ module.exports = class IncomingChannel {
     return yield this._balance.get()
   }
 
-  * create ({ hash }) {
+  * create ({ channelId }) {
     // fetches details from the network to initialize
-    this._hash = hash
-    yield this._store.put('hash_i', hash)
+    this._channelId = channelId
+    yield this._store.put('channel_i', channelId)
 
-    this._tx = yield this._api.connection.request({
-      command: 'tx',
-      transaction: this._hash
-    })
-
-    if (this._tx.Destination !== this._address) {
-      throw new Error('channel destination is ' + this._tx.Destination
+    const paychan = yield this._api.getPaymentChannel(channelId)
+    if (paychan.destination !== this._address) {
+      throw new Error('channel destination is ' + paychan.destination
         + ' but our address is ' + this._address)
     }
 
-    this._publicKey = Buffer.from(this._tx.PublicKey, 'hex').slice(1)
-    this._channelId = util.channelId(
-      this._tx.Account,
-      this._tx.Destination,
-      this._tx.Sequence)
-
-    this._maximum = new BigNumber(this._tx.Amount)
+    this._publicKey = Buffer.from(paychan.publicKey, 'hex').slice(1)
+    this._maximum = new BigNumber(paychan.amount).mul(1000000)
     this._balance = new Balance({
       //     123456789
       name: 'balance_i',
@@ -151,37 +141,13 @@ module.exports = class IncomingChannel {
     })
   }
 
-  * receiveFund (hash) {
-    debug('requesting fund tx from ledger')
-    const fundTx = yield this._api.connection.request({
-      command: 'tx',
-      transaction: hash
-    })
+  * reloadChannelDetails () {
+    debug('reloading channel details')
+    const paychan = yield this._api.getPaymentChannel(this._channelId)
+    debug('got payment channel details:', paychan)
 
-    debug('got result:', fundTx)
-
-    // TODO: verify more of the fields
-    // the fund notification is out of date
-    if (fundTx.Sequence < this._lastSequence) {
-      debug('got out of date fund tx with hash:', hash)
-      return
-    }
-
-    this._lastSequence = fundTx.Sequence
-    const channel = this._channelId.toString('hex').toUpperCase()
-    fundTx.meta.AffectedNodes.forEach((node) => {
-      if (!node.ModifiedNode) return
-
-      console.log('processing fund update node:', node)
-      console.log('index', node.ModifiedNode.LedgerIndex, 'channel', channel)
-      if (node.ModifiedNode.LedgerIndex !== channel) {
-        return
-      }
-
-      const newMax = new BigNumber(node.ModifiedNode.FinalFields.Amount)
-
-      console.log('setting new channel maximum to', newMax.toString())
-      this._balance.setMax(newMax)
-    })
+    const newMax = new BigNumber(paychan.amount).mul(1000000)
+    debug('setting new channel maximum to', newMax.toString())
+    this._balance.setMax(newMax)
   }
 }
