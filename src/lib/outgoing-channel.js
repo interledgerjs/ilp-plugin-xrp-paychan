@@ -41,8 +41,13 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
     if (existingChannel) {
       debug('fetching existing channel id', existingChannel, 'and returning.')
       this._channelId = existingChannel
-      this._hash = yield this._store.get('hash_o')
-      debug('fetching stored hash', this._hash)
+
+      debug('loading channel details')
+      const paychan = yield this._api.getPaymentChannel(this._channelId)
+      const newMax = new BigNumber(paychan.amount).mul(1000000)
+      debug('setting channel maximum to', newMax.toString())
+      this._balance.setMax(newMax)
+
       return
     }
 
@@ -71,10 +76,8 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
 
         debug('created outgoing channel with ID:', channelId)
         this._channelId = channelId
-        this._hash = ev.transaction.hash
 
         this._store.put('channel_o', channelId)
-          .then(() => this._store.put('hash_o', this._hash))
           .then(() => resolve())
           .catch((e) => {
             debug('store error:', e)
@@ -89,12 +92,8 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
   }
 
   getChannelId () {
+    debug('fetching channel ID', this._channelId)
     return this._channelId
-  }
-
-  getHash () {
-    debug('fetching hash', this._hash)
-    return this._hash
   }
 
   * send (transfer) {
@@ -124,10 +123,9 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
   }
 
   * _fundChannel () {
-    this._balance.addMax(this._amount)
     const tx = yield this._api.preparePaymentChannelFund(this._address, {
       channel: this._channelId,
-      amount: util.dropsToXrp(this._amount * (++this._increment))
+      amount: util.dropsToXrp(this._amount)
     })
 
     debug('fund transaction:', tx.txJSON)
@@ -140,8 +138,11 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
     function fundCheck (ev) {
       debug('fund listener processing event:', ev)
       if (ev.transaction.TransactionType !== 'PaymentChannelFund') return
+      if (ev.transaction.Channel !== this._channelId) return
 
       debug('fund tx completed')
+      this._balance.addMax(ev.transaction.Amount)
+
       that._api.connection.removeListener('transaction', fundCheck)
       return that.emitAsync('fund', ev.transaction)
     }
