@@ -108,7 +108,7 @@ module.exports = class IncomingChannel {
       debug('new balance', newBalance.toString(),
         'exceeds threshold', threshold.toString(),
         '. submitting claim tx.')
-      yield this._claimFunds().catch((e) => {
+      yield co.wrap(this._claimFunds()).call(this).catch((e) => {
         console.error(e)
         throw e
       })
@@ -119,6 +119,7 @@ module.exports = class IncomingChannel {
   * _claimFunds () {
     const txTag = util.randomTag()
     const balance = yield this._balance.get()
+    debug('preparing claim tx')
     const tx = yield this._api.preparePaymentChannelClaim(this._address, {
       balance: util.dropsToXrp(balance),
       channel: this._channelId,
@@ -129,6 +130,8 @@ module.exports = class IncomingChannel {
     debug('signing claim funds tx for balance:', balance.toString())
     const signedTx = this._api.sign(tx.txJSON, this._secret)
     const result = yield this._api.submit(signedTx.signedTransaction)
+
+    debug('got claim submit result:', result)
     const claim = this._claim.toString('hex').toUpperCase()
 
     return new Promise((resolve) => {
@@ -136,6 +139,7 @@ module.exports = class IncomingChannel {
 
       function claimCheck (ev) {
         if (ev.transaction.TransactionType !== 'PaymentChannelClaim') return
+        debug('got claim notification:', ev)
         if (ev.transaction.Signature !== claim) return
 
         debug('successfully processed claim for:', balance.toString())
@@ -148,11 +152,15 @@ module.exports = class IncomingChannel {
   }
 
   * receiveFund (hash) {
+    debug('requesting fund tx from ledger')
     const fundTx = yield this._api.connection.request({
       command: 'tx',
       transaction: hash
     })
 
+    debug('got result:', fundTx)
+
+    // TODO: verify more of the fields
     // the fund notification is out of date
     if (fundTx.Sequence < this._lastSequence) {
       debug('got out of date fund tx with hash:', hash)
