@@ -7,7 +7,7 @@ const addressCodec = require('ripple-address-codec')
 
 function channelId (src, dest, sequence) {
   const preimage = Buffer.concat([
-    Buffer.from('\0\0\0x', 'ascii'),
+    Buffer.from('\0x', 'ascii'),
     Buffer.from(addressCodec.decodeAccountID(src)),
     Buffer.from(addressCodec.decodeAccountID(dest)),
     bignum(sequence).toBuffer({ endian: 'big', size: 4 })
