@@ -63,7 +63,7 @@ module.exports = class IncomingChannel {
 
     debug('processing claim for transfer with id:', transfer.id)
     const ourClaim = encode.getClaimMessage(this._channelId, newBalance.toString())
-    debug('verifying signature', claim, 'on', ourClaim)
+    debug('verifying signature "', claim, '" on', ourClaim.toString('hex'))
     const verified = nacl.sign.detached.verify(
       Buffer.from(ourClaim, 'hex'),
       Buffer.from(claim, 'hex'),
@@ -124,21 +124,19 @@ module.exports = class IncomingChannel {
     debug('got claim submit result:', result)
     const claim = this._claim.toString('hex').toUpperCase()
 
-    return new Promise((resolve) => {
-      const api = this._api
+    const api = this._api
+    function claimCheck (ev) {
+      if (ev.transaction.TransactionType !== 'PaymentChannelClaim') return
+      debug('got claim notification:', ev)
+      if (ev.transaction.Signature !== claim) return
 
-      function claimCheck (ev) {
-        if (ev.transaction.TransactionType !== 'PaymentChannelClaim') return
-        debug('got claim notification:', ev)
-        if (ev.transaction.Signature !== claim) return
+      debug('successfully processed claim for:', balance.toString())
+      api.connection.removeListener('transaction', claimCheck)
+    }
 
-        debug('successfully processed claim for:', balance.toString())
-        api.connection.removeListener('transaction', claimCheck)
-        resolve()
-      }
-
-      this._api.connection.on('transaction', claimCheck)
-    })
+    // don't wait on this to complete, because the connector will time the
+    // fulfill call out.
+    this._api.connection.on('transaction', claimCheck)
   }
 
   * reloadChannelDetails () {

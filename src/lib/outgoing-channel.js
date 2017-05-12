@@ -138,10 +138,10 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
     function fundCheck (ev) {
       debug('fund listener processing event:', ev)
       if (ev.transaction.TransactionType !== 'PaymentChannelFund') return
-      if (ev.transaction.Channel !== this._channelId) return
+      if (ev.transaction.Channel !== that._channelId) return
 
       debug('fund tx completed')
-      this._balance.addMax(ev.transaction.Amount)
+      that._balance.addMax(ev.transaction.Amount)
 
       that._api.connection.removeListener('transaction', fundCheck)
       return that.emitAsync('fund', ev.transaction)

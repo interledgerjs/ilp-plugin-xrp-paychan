@@ -265,7 +265,12 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
       this._safeEmit('outgoing_fulfill', transfer, fulfillment)
 
       // gets the claim from the outgoing channel
-      return yield this._outgoingChannel.send(transfer)
+      try {
+        return yield this._outgoingChannel.send(transfer)
+      } catch (e) {
+        debug('claim generation error:', e.stack)
+        throw e
+      }
     }
   }
 
