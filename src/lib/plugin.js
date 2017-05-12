@@ -145,6 +145,9 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
   }
 
   * _disconnect () {
+    debug('claiming outstanding funds before disconnect...') 
+    yield this._incomingChannel._claimFunds()
+    debug('closing api connection')
     yield this._api.disconnect()
     this._connected = false
   }
