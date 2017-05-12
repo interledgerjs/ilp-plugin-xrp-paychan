@@ -93,7 +93,7 @@ module.exports = class IncomingChannel {
       'threshold:', threshold.toString())
 
     // TODO: check if this should be claimed
-    if (newBalance.gt(threshold) {
+    if (newBalance.gt(threshold)) {
       // this should go asynchronously?
       debug('new balance', newBalance.toString(),
         'exceeds threshold', threshold.toString(),
