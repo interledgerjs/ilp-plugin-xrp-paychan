@@ -26,11 +26,11 @@ new PluginRipple({
   channelSecret: 'shh its a secret',
 
   // limit of how much can be owed in-flight to you at once before you stop
-  // accepting more incoming transfers. (in XRP)
-  maxInFlight: '10',
+  // accepting more incoming transfers. (in XRP drops)
+  maxInFlight: '5000000',
 
-  // how much to fund your payment channel. (in XRP)
-  channelAmount: '500'
+  // how much to fund your payment channel. (in XRP drops)
+  channelAmount: '10000000'
 
   // RPC calls to the peer on the other side of the channel are sent to this
   // endpoint using HTTP.
