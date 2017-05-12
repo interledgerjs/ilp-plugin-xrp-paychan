@@ -234,9 +234,14 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
       ])
 
       debug('receive claim from peer:', claim)
-      yield this._incomingChannel.receive(transfer, claim)
-      debug('subtracting', transfer.amount, 'from in-flight for fulfill')
-      yield this._inFlight.sub(transfer.amount)
+      try {
+        yield this._incomingChannel.receive(transfer, claim)
+        debug('subtracting', transfer.amount, 'from in-flight for fulfill')
+        yield this._inFlight.sub(transfer.amount)
+      } catch (e) {
+        debug('claiming error:', e.stack)
+        debug('failed to claim. keeping transfer as in-flight.')
+      }
     }
   }
 
