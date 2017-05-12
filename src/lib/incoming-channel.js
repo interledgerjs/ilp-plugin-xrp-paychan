@@ -41,11 +41,11 @@ module.exports = class IncomingChannel {
     }
 
     this._publicKey = Buffer.from(paychan.publicKey, 'hex').slice(1)
-    this._maximum = new BigNumber(paychan.amount).mul(1000000)
+    const maximum = new BigNumber(paychan.amount).mul(1000000)
     this._balance = new Balance({
       //     123456789
       name: 'balance_i',
-      maximum: this._maximum.toString(),
+      maximum: maximum.toString(),
       store: this._store
     })
   }
@@ -87,13 +87,13 @@ module.exports = class IncomingChannel {
 
 
     debug('checking threshold')
-    const threshold = this._maximum.mul(this._settlePercent)
+    const threshold = this._balance.getMax().mul(this._settlePercent)
     debug('new balance:', newBalance.toString(),
-      'maximum:', this._maximum.toString(),
+      'maximum:', this._balance.toString(),
       'threshold:', threshold.toString())
 
     // TODO: check if this should be claimed
-    if (newBalance.gt(this._maximum.mul(this._settlePercent))) {
+    if (newBalance.gt(threshold) {
       // this should go asynchronously?
       debug('new balance', newBalance.toString(),
         'exceeds threshold', threshold.toString(),
