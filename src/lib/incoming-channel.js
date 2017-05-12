@@ -62,15 +62,18 @@ module.exports = class IncomingChannel {
 
   * receive (transfer, claim) {
     if (!this._channelId) {
+      debug('trying to receive claim on uninitialized channel')
       throw new Error('incoming channel has not been created')
     }
 
     const oldBalance = new BigNumber(yield this._balance.get())
+    debug('adding', transfer.amount, 'to', oldBalance.toString())
     const newBalance = oldBalance
       .add(transfer.amount)
 
     debug('processing claim for transfer with id:', transfer.id)
     const ourClaim = encode.getClaimMessage(this._channelId, newBalance.toString())
+    debug('verifying signature', claim, 'on', ourClaim)
     const verified = nacl.sign.detached.verify(
       Buffer.from(ourClaim, 'hex'),
       Buffer.from(claim, 'hex'),
@@ -78,6 +81,7 @@ module.exports = class IncomingChannel {
 
     if (!verified) {
       // TODO: print the claim here
+      debug('signature was invalid')
       throw new Error('signature (', claim, ') is invalid for claim:',
         ourClaim)
     }
@@ -87,10 +91,12 @@ module.exports = class IncomingChannel {
 
     // if the other side is sending claims we can't cash, then this will
     // figure it out
+    debug('adding transfer amount to balance')
     yield this._balance.add(transfer.amount)
     this._claim = claim
 
 
+    debug('checking threshold')
     const threshold = this._maximum.mul(this._settlePercent)
     debug('new balance:', newBalance.toString(),
       'maximum:', this._maximum.toString(),

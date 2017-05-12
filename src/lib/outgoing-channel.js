@@ -130,15 +130,18 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
       amount: util.dropsToXrp(this._amount * (++this._increment))
     })
 
+    debug('fund transaction:', tx.txJSON)
     const signedTx = this._api.sign(tx.txJSON, this._secret)
     debug('submitting fund tx for an additional:', this._amount)
     const result = yield this._api.submit(signedTx.signedTransaction)
+    debug('fund submit result:', result)
 
     const that = this
     function fundCheck (ev) {
+      debug('fund listener processing event:', ev)
       if (ev.transaction.TransactionType !== 'PaymentChannelFund') return
 
-      debug('fund tx completed:', ev)
+      debug('fund tx completed')
       that._api.connection.removeListener('transaction', fundCheck)
       return that.emitAsync('fund', ev.transaction)
     }
