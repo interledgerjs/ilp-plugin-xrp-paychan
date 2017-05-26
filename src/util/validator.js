@@ -26,9 +26,14 @@ module.exports = class Validator {
     assert(t.ledger, 'must have a ledger')
     assert(t.amount, 'must have an amount')
 
+    if (t.executionCondition || t.expiresAt) {
+      assert(t.executionCondition, 'must have executionCondition if expiresAt is defined')
+      assert(t.expiresAt, 'must have expiresAt if executionCondition is defined')
+    }
+
     assertString(t.id, 'id')
     assertNumber(t.amount, 'amount')
-    assertObject(t.data, 'data')
+    assertString(t.ilp, 'ilp')
     assertObject(t.noteToSelf, 'noteToSelf')
     assertObject(t.custom, 'custom')
     assertCondition(t.executionCondition, 'executionCondition')
@@ -100,24 +105,32 @@ function assertPrefix (value, prefix, name) {
 
 function assertAccount (value, account, name) {
   assertString(value, name)
-  assert(value === account,
-    name + ' (' + value + ') must match account: ' + account)
+  // not worrying about this for now, because it gives some serious problems
+  // to components that are on an old LPI
+  /*assert(value === account,
+    name + ' (' + value + ') must match account: ' + account)*/
 }
 
 function assertCondition (value, name) {
+  // turn off for now, because then it doesn't have to deal with the old CC format
+  /*
   if (!value) return
   assertString(value, name)
   if (Buffer.from(value, 'base64').length !== 32) {
     throw new InvalidFieldsError(name + ' (' + value + '): ' + e.message)
   }
+  */
 }
 
 function assertFulfillment (value, name) {
+  // turn off for now, because then it doesn't have to deal with the old CC format
+  /*
   if (!value) return
   assertString(value, name)
   if (Buffer.from(value, 'base64').length !== 32) {
     throw new InvalidFieldsError(name + ' (' + value + '): ' + e.message)
   }
+  */
 }
 
 function isNumber (number) {
