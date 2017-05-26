@@ -131,6 +131,9 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     while (!incomingChannel) {
       try {
         incomingChannel = yield this._rpc.call('_get_channel', this._prefix, [ 'get_channel' ])
+        if (typeof incomingChannel !== 'string') {
+          throw new Error('got non-string response:' + JSON.stringify(incomingChannel))
+        }
         debug('got peer payment channel:', incomingChannel)
       } catch (e) {
         debug('get channel failed:', e.message)
