@@ -3,12 +3,11 @@
 // TODO: faster library for crypto?
 const nacl = require('tweetnacl')
 const BigNumber = require('bignumber.js')
-const co = require('co')
 const util = require('../util')
-const Balance = require('./balance')
 const EventEmitter2 = require('eventemitter2')
 const encode = require('../util/encode')
 const debug = require('debug')('ilp-plugin-xrp-paychan:outgoing-channel')
+const uuid = require('uuid')
 
 module.exports = class OutgoingChannel extends EventEmitter2 {
   constructor (opts) {
@@ -23,46 +22,21 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
     this._destination = opts.destination
     this._store = opts.store
     this._keyPair = nacl.sign.keyPair.fromSeed(util.sha256(opts.channelSecret))
-    this._balance = new Balance({
-      //     123456789
-      name: 'balance_o',
-      maximum: this._amount,
-      store: this._store
-    })
+    this._channelCreationStage = opts.channelCreationStage
   }
 
-  * getBalance () {
-    if (!this._channelId) throw new Error('must be connected before getBalance')
-    return yield this._balance.get()
-  }
-
-  * create () {
-    const existingChannel = yield this._store.get('channel_o')
-    if (existingChannel) {
-      debug('fetching existing channel id', existingChannel, 'and returning.')
-      this._channelId = existingChannel
-
-      debug('loading channel details')
-      const paychan = yield this._api.getPaymentChannel(this._channelId)
-      const newMax = new BigNumber(paychan.amount).mul(1000000)
-      debug('setting channel maximum to', newMax.toString())
-      this._balance.setMax(newMax)
-
-      return
-    }
-
+  async _createChannel () {
     const txTag = util.randomTag()
-    const tx = yield this._api.preparePaymentChannelCreate(this._address, {
+    const tx = await this._api.preparePaymentChannelCreate(this._address, {
       amount: util.dropsToXrp(this._amount),
       destination: this._destination,
       settleDelay: 90000,
       publicKey: 'ED' + Buffer.from(this._keyPair.publicKey).toString('hex').toUpperCase(),
       sourceTag: txTag
-      // TODO: specify a cancelAfter?
     })
 
     const signedTx = this._api.sign(tx.txJSON, this._secret)
-    yield this._api.submit(signedTx.signedTransaction)
+    const result = await this._api.submit(signedTx.signedTransaction)
 
     return new Promise((resolve) => {
       function handleTransaction (ev) {
@@ -77,7 +51,7 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
         debug('created outgoing channel with ID:', channelId)
         this._channelId = channelId
 
-        this._store.put('channel_o', channelId)
+        this._channelCreationStage.setIfMax({ value: '2', data: channelId })
           .then(() => resolve())
           .catch((e) => {
             debug('store error:', e)
@@ -90,40 +64,42 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
       this._api.connection.on('transaction', handleTransaction.bind(this))
     })
   }
+  
+  async create () {
+    const randomTag = uuid()
+    const bumped = await this._channelCreationStage.setIfMax({ value: '1', data: randomTag })
+    const myJob = (bumped.data !== randomTag)
+
+    if (myJob) {
+      await this._createChannel()
+    } else {
+      let current = bumped
+      while (current.value !== '2') {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        current = await this._channelCreationStage.getMax()
+      }
+
+      this._channelId = current.data
+    }
+  }
 
   getChannelId () {
     debug('fetching channel ID', this._channelId)
     return this._channelId
   }
 
-  * send (transfer) {
+  async createClaim (outgoingBalance) {
     if (!this._channelId) {
       throw new Error('channel has not been created')
     }
 
-    // this will complain if the amount exceeds the maximum
-    yield this._balance.add(transfer.amount)
-    const claim = yield this._balance.get()
-    const threshold = this._balance.getMax().mul(this._fundPercent)
-
-    if (threshold.lt(claim)) {
-      debug('balance of', claim.toString(), 'exceeds threshold',
-        threshold.toString(), '. triggering fund tx.')
-      yield co.wrap(this._fundChannel).call(this).catch((e) => {
-        console.error(e)
-        throw e
-      })
-    }
-
-    debug('creating outgoing claim for new balance:', claim.toString())
-    const message = encode.getClaimMessage(this._channelId, claim)
+    const message = encode.getClaimMessage(this._channelId, outgoingBalance)
     const signature = nacl.sign.detached(message, this._keyPair.secretKey)
-
     return Buffer.from(signature).toString('hex')
   }
 
-  * _fundChannel () {
-    const tx = yield this._api.preparePaymentChannelFund(this._address, {
+  async _fundChannel () {
+    const tx = await this._api.preparePaymentChannelFund(this._address, {
       channel: this._channelId,
       amount: util.dropsToXrp(this._amount)
     })
@@ -131,7 +107,7 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
     debug('fund transaction:', tx.txJSON)
     const signedTx = this._api.sign(tx.txJSON, this._secret)
     debug('submitting fund tx for an additional:', this._amount)
-    const result = yield this._api.submit(signedTx.signedTransaction)
+    const result = await this._api.submit(signedTx.signedTransaction)
     debug('fund submit result:', result)
 
     const that = this
@@ -141,8 +117,6 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
       if (ev.transaction.Channel !== that._channelId) return
 
       debug('fund tx completed')
-      that._balance.addMax(ev.transaction.Amount)
-
       that._api.connection.removeListener('transaction', fundCheck)
       return that.emitAsync('fund', ev.transaction)
     }
