@@ -5,6 +5,9 @@ peer.  Current in-flight payments are at risk (your peer can choose not to give
 you claims for them), but if the amount in-flight exceeds your `inFlightLimit`,
 you won't acknowledge incoming transfers until you're paid.
 
+**Warning: This plugin is still in a development state, and should not be used with
+live accounts.**
+
 # Example
 
 ```js
@@ -26,11 +29,11 @@ new PluginRipple({
   channelSecret: 'shh its a secret',
 
   // limit of how much can be owed in-flight to you at once before you stop
-  // accepting more incoming transfers. (in XRP)
-  maxInFlight: '10',
+  // accepting more incoming transfers. (in XRP drops)
+  maxInFlight: '5000000',
 
-  // how much to fund your payment channel. (in XRP)
-  channelAmount: '500'
+  // how much to fund your payment channel. (in XRP drops)
+  channelAmount: '10000000'
 
   // RPC calls to the peer on the other side of the channel are sent to this
   // endpoint using HTTP.
