@@ -5,6 +5,9 @@ peer.  Current in-flight payments are at risk (your peer can choose not to give
 you claims for them), but if the amount in-flight exceeds your `inFlightLimit`,
 you won't acknowledge incoming transfers until you're paid.
 
+**Warning: This plugin is still in a development state, and should not be used with
+live accounts.**
+
 # Example
 
 ```js
