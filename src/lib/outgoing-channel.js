@@ -62,7 +62,7 @@ module.exports = class OutgoingChannel extends EventEmitter2 {
     })
 
     const signedTx = this._api.sign(tx.txJSON, this._secret)
-    const result = yield this._api.submit(signedTx.signedTransaction)
+    yield this._api.submit(signedTx.signedTransaction)
 
     return new Promise((resolve) => {
       function handleTransaction (ev) {

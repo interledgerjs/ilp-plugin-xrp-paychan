@@ -12,13 +12,13 @@ module.exports = class Validator {
   validateIncomingTransfer (t) {
     this.validateTransfer(t)
     if (t.account) return
-    this.assertIncoming(t) 
+    this.assertIncoming(t)
   }
 
   validateOutgoingTransfer (t) {
     this.validateTransfer(t)
     if (t.account) return
-    this.assertOutgoing(t) 
+    this.assertOutgoing(t)
   }
 
   validateTransfer (t) {
@@ -46,7 +46,7 @@ module.exports = class Validator {
 
   validateIncomingMessage (m) {
     this.validateMessage(m)
-    this.assertIncoming(m) 
+    this.assertIncoming(m)
   }
 
   validateOutgoingMessage (m) {
@@ -107,8 +107,8 @@ function assertAccount (value, account, name) {
   assertString(value, name)
   // not worrying about this for now, because it gives some serious problems
   // to components that are on an old LPI
-  /*assert(value === account,
-    name + ' (' + value + ') must match account: ' + account)*/
+  /* assert(value === account,
+    name + ' (' + value + ') must match account: ' + account) */
 }
 
 function assertCondition (value, name) {

@@ -148,7 +148,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
   }
 
   * _disconnect () {
-    debug('claiming outstanding funds before disconnect...') 
+    debug('claiming outstanding funds before disconnect...')
     yield this._incomingChannel._claimFunds()
     debug('closing api connection')
     yield this._api.disconnect()
@@ -198,7 +198,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     debug('sending transfer:', transfer)
 
     yield this._rpc.call('send_transfer', this._prefix, [
-      Object.assign({}, transfer, { noteToSelf: undefined }),
+      Object.assign({}, transfer, { noteToSelf: undefined })
     ])
 
     this._safeEmit('outgoing_prepare', transfer)
@@ -345,7 +345,6 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     const expiry = Date.parse(expiresAt)
     const now = new Date()
 
-    const that = this
     setTimeout(
       co.wrap(this._expire).bind(this, transferId),
       (expiry - now))
@@ -368,7 +367,7 @@ module.exports = class PluginXrpPaychan extends EventEmitter2 {
     }
 
     if (packaged.isIncoming) {
-      debug('subtracting', transfer.amount, 'from in-flight for expiry')
+      debug('subtracting', packaged.transfer.amount, 'from in-flight for expiry')
       yield this._inFlight.sub(packaged.transfer.amount)
     }
 

@@ -36,7 +36,7 @@ function xrpToDrops (n) {
   return (new BigNumber(n)).mul('1000000').round().toString()
 }
 
-//const omit = (obj, field) => Object.assign({}, obj, { [field]: undefined })
+// const omit = (obj, field) => Object.assign({}, obj, { [field]: undefined })
 const sha256 = (m) => crypto.createHash('sha256').update(m, 'utf8').digest()
 
 const toBuffer = (n, size) => bignum(n).toBuffer({

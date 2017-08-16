@@ -2,7 +2,6 @@
 
 const Balance = require('./balance')
 const BigNumber = require('bignumber.js')
-const bignum = require('bignum')
 const util = require('../util')
 const nacl = require('tweetnacl')
 const encode = require('../util/encode')
@@ -15,7 +14,7 @@ module.exports = class IncomingChannel {
     this._secret = opts.secret
     this._address = opts.address
     // TODO: uintarray, buffer, or string?
-    this._balance = null 
+    this._balance = null
     this._store = opts.store
     this._claim = null
     // TODO: stop hardcoding this
@@ -36,8 +35,8 @@ module.exports = class IncomingChannel {
 
     const paychan = yield this._api.getPaymentChannel(channelId)
     if (paychan.destination !== this._address) {
-      throw new Error('channel destination is ' + paychan.destination
-        + ' but our address is ' + this._address)
+      throw new Error('channel destination is ' + paychan.destination +
+        ' but our address is ' + this._address)
     }
 
     this._publicKey = Buffer.from(paychan.publicKey, 'hex').slice(1)
@@ -85,7 +84,6 @@ module.exports = class IncomingChannel {
     yield this._balance.add(transfer.amount)
     this._claim = claim
 
-
     debug('checking threshold')
     const threshold = this._balance.getMax().mul(this._settlePercent)
     debug('new balance:', newBalance.toString(),
@@ -102,19 +100,18 @@ module.exports = class IncomingChannel {
         console.error(e)
         throw e
       })
-      //co(this._claimFunds.bind(this))
+      // co(this._claimFunds.bind(this))
     }
   }
 
   * _claimFunds () {
-    const txTag = util.randomTag()
     const balance = yield this._balance.get()
     debug('preparing claim tx')
     const tx = yield this._api.preparePaymentChannelClaim(this._address, {
       balance: util.dropsToXrp(balance),
       channel: this._channelId,
       signature: this._claim.toUpperCase(),
-      publicKey: 'ED' + this._publicKey.toString('hex').toUpperCase(),
+      publicKey: 'ED' + this._publicKey.toString('hex').toUpperCase()
     })
 
     debug('signing claim funds tx for balance:', balance.toString())
