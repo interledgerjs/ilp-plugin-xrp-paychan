@@ -79,7 +79,6 @@ module.exports = makePaymentChannelPlugin({
 
   constructor: function (ctx, opts) {
     const self = ctx.state
-Buffer.from
     self.api = new RippleAPI({ server: opts.server })
     self.address = opts.address
     self.secret = opts.secret
@@ -158,7 +157,9 @@ Buffer.from
 
     // if another process in currently creating the channel
     } else if (result.value === STATE_CREATING_CHANNEL) {
-      // TODO: poll for channelId
+      // poll for channelId
+      while (self.outgoingChannel.getMax().value !== 2) { await sleep(5000) }
+      channelId = self.outgoingChannel.getMax().data
     }
 
     // TODO: recreate channel if it doesn't exist
