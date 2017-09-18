@@ -58,7 +58,7 @@ const claimFunds = async (self, amount, signature) => {
   await self.api.submit(signedTx.signedTransaction)
 
   return new Promise((resolve) => {
-    handleTransaction (ev) {
+    const handleTransaction = function (ev) {
       if (ev.transaction.SourceTag !== txTag) return
       if (ev.transaction.Account !== self.address) return
 
@@ -106,6 +106,7 @@ module.exports = makePaymentChannelPlugin({
   connect: async function (ctx) {
     const self = ctx.state
     await self.api.connect()
+
     await self.api.connection.request({
       command: 'subscribe',
       accounts: [ self.address, self.peerAddress ]
@@ -187,8 +188,8 @@ module.exports = makePaymentChannelPlugin({
     // return nothing
   },
 
-  getAccount: ctx => ctx.state.prefix + ctx.state.address
-  getPeerAccount: ctx => ctx.state.prefix + ctx.state.peerAddress
+  getAccount: ctx => ctx.state.prefix + ctx.state.address,
+  getPeerAccount: ctx => ctx.state.prefix + ctx.state.peerAddress,
   getInfo: ctx => ({
     currencyCode: 'XRP',
     currencyScale: 6,
@@ -239,7 +240,7 @@ module.exports = makePaymentChannelPlugin({
 
     // validate claim
     const verified = nacl.sign.detached.verify(
-      Buffer.from(signature, 'hex')
+      Buffer.from(signature, 'hex'),
       encodedClaim,
       Buffer.from(self.incomingPaymentChannel.PublicKey, 'hex')
     )
