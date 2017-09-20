@@ -7,5 +7,11 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "bignum": "^0.12.5",
+    "ripple-lib": "^0.17.7",
+    "tweetnacl": "^1.0.0",
+    "uuid": "^3.1.0"
+  }
 }
