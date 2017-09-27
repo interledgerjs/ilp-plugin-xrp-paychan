@@ -1,5 +1,6 @@
 'use strict'
 
+// imports
 const { RippleAPI } = require('ripple-lib')
 const addressCodec = require('ripple-address-codec')
 const { makePaymentChannelPlugin } = require('ilp-plugin-payment-channel-framework')
@@ -11,14 +12,20 @@ const bignum = require('bignum') // required in order to convert to buffer
 const BigNumber = require('bignumber.js')
 const debug = require('debug')('ilp-plugin-xrp-paychan')
 
+// constants
+const DEFAULT_SETTLE_DELAY = 60
 const STATE_NO_CHANNEL = '0'
 const STATE_CREATING_CHANNEL = '1'
 const STATE_CHANNEL = '2'
+
+// utility functions
 const sleep = (time) => new Promise((resolve) => setTimeout(resolve, time))
 const randomTag = () => bignum.fromBuffer(crypto.randomBytes(4), {
   endian: 'big',
   size: 4
 }).toNumber()
+
+const dropsToXrp = (drops) => new BigNumber(drops).div(1000000).toString()
 
 const encodeClaim = (amount, id) => Buffer.concat([
   Buffer.from('CLM\0'),
@@ -46,25 +53,32 @@ const computeChannelId = (src, dest, sequence) => {
 }
 
 const claimFunds = async (self, amount, signature) => {
-  const txTag = randomTag()
   const tx = await self.api.preparePaymentChannelClaim(self.address, {
-    balance: new BigNumber(amount).div(1000000).toString(),
+    balance: dropsToXrp(amount),
     channel: self.incomingPaymentChannelId,
-    signature: signature,
+    signature: signature.toUpperCase(),
     publicKey: self.incomingPaymentChannel.publicKey
   })
 
   const signedTx = self.api.sign(tx.txJSON, self.secret)
   debug('submitting claim transaction ', tx)
-  await self.api.submit(signedTx.signedTransaction)
+  const {resultCode, resultMessage} = await self.api.submit(signedTx.signedTransaction)
+  if (resultCode !== 'tesSUCCESS') {
+    debug('Error submitting claim: ', resultMessage)
+    throw new Error('Could not claim funds: ', resultMessage)
+  }
 
   return new Promise((resolve) => {
     const handleTransaction = function (ev) {
-      if (ev.transaction.SourceTag !== txTag) return
       if (ev.transaction.Account !== self.address) return
+      if (ev.transaction.Channel !== self.incomingPaymentChannelId) return
+      if (ev.transaction.Balance !== dropsToXrp(amount)) return
 
-      // TODO: verify success status
-      debug('successfully submitted claim', signature, 'for amount', amount)
+      if (ev.engine_result !== 'tesSUCCESS') {
+        debug('successfully submitted claim', signature, 'for amount', amount)
+      } else {
+        debug('claiming funds failed ', ev)
+      }
 
       setImmediate(() => self.api.connection
         .removeListener('transaction', handleTransaction))
@@ -91,6 +105,7 @@ module.exports = makePaymentChannelPlugin({
     self.prefix = opts.prefix // TODO: auto-generate prefix?
     self.peerPublicKey = opts.peerPublicKey // TODO: read the pub key from the result of getPaymentChannel?
     self.authToken = opts.token
+    self.settleDelay = opts.settleDelay || DEFAULT_SETTLE_DELAY
 
     // TODO: figure out best way to create secure keypair
     self.keyPair = nacl.sign.keyPair.fromSeed(sha256(Buffer.from(self.secret)))
@@ -99,7 +114,7 @@ module.exports = makePaymentChannelPlugin({
     self.incomingClaimSubmitted = ctx.backend.getMaxValueTracker('incoming_claim_submitted')
 
     ctx.rpc.addMethod('ripple_channel_id', () => {
-      return self.outgoingPaymentChannelId || null     
+      return self.outgoingPaymentChannelId || null
     })
   },
 
@@ -128,13 +143,11 @@ module.exports = makePaymentChannelPlugin({
       // create the channel
       const txTag = randomTag()
       let tx
-      try {  
+      try {
         tx = await self.api.preparePaymentChannelCreate(self.address, {
-          // TODO: @sharafian, self.maxAmount is undefined, is ctx.plugin._opts.channelAmount correct ?
-          // amount: new BigNumber(self.maxAmount).div(1000000).toString(),
-          amount: new BigNumber(ctx.plugin._opts.channelAmount).div(1000000).toString(),
+          amount: dropsToXrp(self.channelAmount),
           destination: self.peerAddress,
-          settleDelay: 60,
+          settleDelay: self.settleDelay,
           publicKey: 'ED' + Buffer.from(self.keyPair.publicKey).toString('hex').toUpperCase(),
           sourceTag: txTag
         })
@@ -146,7 +159,7 @@ module.exports = makePaymentChannelPlugin({
       const signedTx = self.api.sign(tx.txJSON, self.secret)
       const {resultCode, resultMessage} = await self.api.submit(signedTx.signedTransaction)
       if (resultCode !== 'tesSUCCESS') {
-        debug('Something went wrong creating the payment channel', resultMessage)
+        debug('Error creating the payment channel: ', resultMessage)
       }
 
       await new Promise((resolve) => {
@@ -173,7 +186,7 @@ module.exports = makePaymentChannelPlugin({
     // if another process in currently creating the channel
     } else if (result.value === STATE_CREATING_CHANNEL) {
       // poll for channelId
-      while (self.outgoingChannel.getMax().value !== 2) { await sleep(5000) }
+      while (self.outgoingChannel.getMax().value !== STATE_CHANNEL) { await sleep(5000) }
       channelId = self.outgoingChannel.getMax().data
     }
 
@@ -189,8 +202,14 @@ module.exports = makePaymentChannelPlugin({
     }
 
     // look up channel on ledger
-    // TODO: if incoming channel doesn't exist, throw an error
-    self.incomingPaymentChannel = await self.api.getPaymentChannel(self.incomingPaymentChannelId)
+    try {
+      self.incomingPaymentChannel = await self.api.getPaymentChannel(self.incomingPaymentChannelId)
+    } catch (err) {
+      if (err.name === 'RippledError' && err.message === 'entryNotFound') {
+        debug('incoming payment channel does not exit:', self.incomingPaymentChannelId)
+      }
+      throw err
+    }
   },
 
   disconnect: async function (ctx) {
@@ -203,7 +222,6 @@ module.exports = makePaymentChannelPlugin({
       debug(err)
     }
 
-
     // TODO: close channel?
     // return nothing
   },
@@ -211,16 +229,15 @@ module.exports = makePaymentChannelPlugin({
   getAccount: ctx => ctx.state.prefix + ctx.state.address,
   getPeerAccount: ctx => ctx.state.prefix + ctx.state.peerAddress,
   getInfo: ctx => ({
-        currencyCode: 'XRP',
-        currencyScale: 6,
-        prefix: ctx.state.prefix,
-        connectors: [ ctx.state.prefix + ctx.state.peerAddress ]    
-    }),
+    currencyCode: 'XRP',
+    currencyScale: 6,
+    prefix: ctx.state.prefix,
+    connectors: [ ctx.state.prefix + ctx.state.peerAddress ]
+  }),
 
   handleIncomingPrepare: async function (ctx, transfer) {
     const self = ctx.state
     const incoming = await ctx.transferLog.getIncomingFulfilledAndPrepared()
-    // TODO: figure out how to decode claim
     const amountSecured = await self.incomingClaim.getMax()
 
     // handle unsecured amount
@@ -242,8 +259,9 @@ module.exports = makePaymentChannelPlugin({
 
     // sign a claim
     const signature = nacl.sign.detached(encodedClaim, self.keyPair.secretKey)
-    // const isValid = nacl.sign.detached.verify(encodedClaim, signature, self.keyPair.publicKey)
-    console.log('isValid', Buffer.from(self.keyPair.publicKey).toString('hex').toUpperCase())
+
+    debug(`signing outgoing claim for ${outgoingBalance} drops on ` +
+      `channel ${self.outgoingPaymentChannelId}`)
 
     // issue a fund tx if required
     //   tell peer about fund tx
@@ -259,32 +277,31 @@ module.exports = makePaymentChannelPlugin({
     // get claim+amount
     const self = ctx.state
     const { amount, signature } = claim
+    debug(`received claim for ${amount} drops on channel ${self.incomingPaymentChannelId}`)
+
     const encodedClaim = encodeClaim(amount, self.incomingPaymentChannelId)
-
-    // validate claim
-
-    const verified = nacl.sign.detached.verify(
-      encodedClaim,
-      Buffer.from(signature, 'hex'),
-      Buffer.from(self.incomingPaymentChannel.publicKey.substring(2), 'hex')
-    )
-
+    let valid = false
+    try {
+      valid = nacl.sign.detached.verify(
+        encodedClaim,
+        Buffer.from(signature, 'hex'),
+        Buffer.from(self.incomingPaymentChannel.publicKey.substring(2), 'hex')
+      )
+    } catch (err) {
+      debug('verifying signature failed:', err.message)
+    }
     // TODO: better reconciliation if claims are invalid
-    if (!verified) {
-      debug('got invalid claim signature', signature, 'for amount', amount)
-      throw new Error('got invalid claim signature ' + signature + ' for amount ' + amount)
+    if (!valid) {
+      debug(`got invalid claim signature ${signature} for amount ${amount} drops`)
+      throw new Error('got invalid claim signature ' +
+        signature + ' for amount ' + amount + ' drops')
     }
 
     // validate claim against balance
-    console.log(self.incomingPaymentChannel)
-    // TODO: @sharafian, shouldn't amount be compared to incomingPaymentChannel.amount?
-    // if (new BigNumber(amount).gt(self.incomingPaymentChannel.balance)) {
     if (new BigNumber(amount).gt(self.incomingPaymentChannel.amount)) {
       debug('got claim for higher amount', amount,
-        // 'than channel balance', self.incomingPaymentChannel.balance)
         'than channel balance', self.incomingPaymentChannel.amount)
       throw new Error('got claim for higher amount ' + amount +
-        // ' than channel balance ' + self.incomingPaymentChannel.balance)
         ' than channel balance ' + self.incomingPaymentChannel.amount)
     }
 
