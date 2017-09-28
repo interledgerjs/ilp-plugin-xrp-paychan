@@ -6,6 +6,8 @@ const BigNumber = require('bignumber.js')
 const PEER_PRIVATE_KEY = '69C7405BDA3D0FEC97238DF72F026A46E6DDF88B88BD07F4497141737BFB66921AC9FD5AA2A8B13C8D25464F5C410A29E9AEE094E4D4EEDBE66E33E8D14F06DA'
 const PEER_PUBLIC_KEY = '1AC9FD5AA2A8B13C8D25464F5C410A29E9AEE094E4D4EEDBE66E33E8D14F06DA'
 
+const xrpToDrops = (xrp) => new BigNumber(xrp).mul(1000000).toString()
+
 class ApiMock {
   constructor (opts, ...args) {
     this._pluginOpts = opts
@@ -55,7 +57,7 @@ class ApiMock {
       transaction: {
         Account: address,
         Channel: paymentChannelCreate.channel,
-        Balance: paymentChannelCreate.balance
+        Balance: parseInt(xrpToDrops(paymentChannelCreate.balance))
       }
     })
     return {

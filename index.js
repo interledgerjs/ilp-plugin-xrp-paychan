@@ -237,10 +237,15 @@ module.exports = makePaymentChannelPlugin({
 
   handleIncomingPrepare: async function (ctx, transfer) {
     const self = ctx.state
+
+    if (self.incomingPaymentChannel === null) {
+      throw new Error('incoming payment channel must be established ' +
+        'before incoming transfers are processed')
+    }
+
+    // check that the unsecure amount does not exceed the limit
     const incoming = await ctx.transferLog.getIncomingFulfilledAndPrepared()
     const amountSecured = await self.incomingClaim.getMax()
-
-    // handle unsecured amount
     const exceeds = new BigNumber(incoming)
       .minus(amountSecured.value)
       .greaterThan(self.maxUnsecured)
