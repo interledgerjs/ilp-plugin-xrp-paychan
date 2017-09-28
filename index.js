@@ -72,9 +72,9 @@ const claimFunds = async (self, amount, signature) => {
     const handleTransaction = function (ev) {
       if (ev.transaction.Account !== self.address) return
       if (ev.transaction.Channel !== self.incomingPaymentChannelId) return
-      if (ev.transaction.Balance !== dropsToXrp(amount)) return
+      if (ev.transaction.Balance !== amount) return
 
-      if (ev.engine_result !== 'tesSUCCESS') {
+      if (ev.engine_result === 'tesSUCCESS') {
         debug('successfully submitted claim', signature, 'for amount', amount)
       } else {
         debug('claiming funds failed ', ev)
