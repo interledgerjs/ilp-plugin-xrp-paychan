@@ -94,7 +94,7 @@ module.exports = makePaymentChannelPlugin({
 
   constructor: function (ctx, opts) {
     const self = ctx.state
-    self.api = new RippleAPI({ server: opts.server })
+    self.api = new RippleAPI({ rippledServer: opts.server })
     self.address = opts.address
     self.secret = opts.secret
     self.peerAddress = opts.peerAddress

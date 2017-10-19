@@ -12,8 +12,6 @@ const expect = chai.expect
 
 const MockSocket = require('ilp-plugin-payment-channel-framework/test/helpers/mockSocket')
 const apiHelper = require('./helper/apiHelper')
-const { protocolDataToIlpAndCustom } =
-  require('ilp-plugin-payment-channel-framework/src/util/protocolDataConverter')
 const btpPacket = require('btp-packet')
 const BigNumber = require('bignumber.js')
 const proxyquire = require('proxyquire')
@@ -26,24 +24,30 @@ describe('channelSpec', function () {
     let store = {}
     this.opts = {
       maxBalance: '1000000000',
+      server: 'btp+wss://btp-server.example',
       prefix: 'g.eur.mytrustline.',
+      info: {
+        prefix: 'g.eur.mytrustline.',
+        currencyScale: 9,
+        currencyCode: 'XRP',
+        connector: []
+      },
       settleDelay: 10,
       token: 'shared_secret',
-      server: 'wss://s.altnet.rippletest.net:51233',
+      rippledServer: 'wss://s.altnet.rippletest.net:51233',
       address: 'rQBHyjckUFGZK1nPDKzTU8Zyvd2niqHcpo',
       secret: 'shDssKGbxxpJacxpQzfacKcnutYGU',
       peerAddress: 'rPZUg1NH7gAfkpRpKbcwyn8ET7EPqhTFiv',
       channelSecret: 'shh its a secret',
       maxUnsecured: '5000000',
       maxAmount: '100000000',
-      rpcUri: 'https://peer.example',
+      rpcUri: 'btp+wss://peer.example',
       _store: {
         get: async (k) => store[k],
         put: async (k, v) => { store[k] = v },
         del: async (k) => delete store[k]
       }
     }
-    // 
     this.claim = {
       amount: 5,
       signature: '1315c92c5ed0b959b057ce6758eab5152e42ff22c0b73568ffa836ca0415c63a3c401af44e2b73a8730bb39f9ce525083b3cf408754f491f76298520c352940a'
@@ -63,8 +67,17 @@ describe('channelSpec', function () {
     this.plugin = new PluginRipple(this.opts)
     this.pluginState = this.plugin._paychanContext.state
     this.mockSocket = new MockSocket()
-    this.plugin.addSocket(this.mockSocket)
+    this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId}) => {
+      return btpPacket.serializeResponse(requestId, []) // reply to auth message
+    })
+    this.plugin.addSocket(this.mockSocket, {username: '', token: ''})
     this.incomingPaymentChannelId = 123456789
+
+    this.payChanIdRequest = [{
+      protocolName: 'ripple_channel_id',
+      contentType: btpPacket.MIME_APPLICATION_JSON,
+      data: Buffer.from('[]')
+    }]
     this.payChanIdResponse = [{
       protocolName: 'ripple_channel_id',
       contentType: btpPacket.MIME_APPLICATION_JSON,
@@ -111,10 +124,8 @@ describe('channelSpec', function () {
 
     it('requests incoming payment channel id', async function () {
       this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId, data}) => {
-        const {custom} = protocolDataToIlpAndCustom(data)
-        assert(custom)
-        assert(custom.ripple_channel_id)
-
+        assert.nestedProperty(data, 'protocolData')
+        assert.deepEqual(data.protocolData, this.payChanIdRequest)
         return btpPacket.serializeResponse(requestId, this.payChanIdResponse)
       })
       await this.plugin.connect()
@@ -130,9 +141,11 @@ describe('channelSpec', function () {
         })
         .reply(btpPacket.TYPE_RESPONSE, ({requestId, data}) => {
           assert.equal(requestId, 1234)
-          const {custom} = protocolDataToIlpAndCustom(data)
-          assert.equal(custom.ripple_channel_id,
-            this.pluginState.outgoingPaymentChannelId)
+          assert.lengthOf(data.protocolData, 1)
+          assert.equal(data.protocolData[0].protocolName, 'ripple_channel_id')
+          assert.equal(data.protocolData[0].contentType, btpPacket.MIME_APPLICATION_JSON)
+          const actualChanId = JSON.parse(data.protocolData[0].data.toString('utf8'))
+          assert.equal(actualChanId, this.pluginState.outgoingPaymentChannelId)
         })
 
       await this.plugin.connect()
