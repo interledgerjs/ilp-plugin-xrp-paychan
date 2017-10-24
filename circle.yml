@@ -7,6 +7,8 @@ test:
     - npm run lint
     # Run tests with coverage
     - npm test
+    # Run integration test suite
+    # - if git log -1 --pretty=%B | grep -qF "[skip tests]"; then true; else npm run integration; fi
   post:
     # Upload code coverage data
     - bash <(curl -s https://codecov.io/bash) || echo "Codecov did not collect coverage reports"
@@ -16,7 +18,7 @@ deployment:
     commands:
       # Push NPM package if not yet published
       - mv npmrc-env .npmrc
-      - if [ "$(npm show ilp-plugin-xrp-paychan version || echo)" != "$(npm ls --depth=-1 2>/dev/null | head -1 | cut -f 1 -d " " | cut -f 2 -d @)" ] ; then npm publish ; fi
+      - if [ $(npm show ilp-plugin-payment-channel-framework version) != $(npm ls --depth=-1 2>/dev/null | head -1 | cut -f 1 -d " " | cut -f 2 -d @) ] ; then npm publish ; fi
 general:
   artifacts:
     - "coverage/lcov-report"
