@@ -50,11 +50,11 @@ describe('channelSpec', function () {
     }
     this.claim = {
       amount: 5,
-      signature: '1315c92c5ed0b959b057ce6758eab5152e42ff22c0b73568ffa836ca0415c63a3c401af44e2b73a8730bb39f9ce525083b3cf408754f491f76298520c352940a'
+      signature: '1bbcfe0cf035a07a95f90d750daff948fb92e367ba237955d6799d76db6e0a06016da211dce212f4bbc5a88e95d724b316b1f800ed55f648585eb48a16371c09'
     }
     this.exceedingClaim = {
       amount: 5000000,
-      signature: 'f126f94fa55ee23b61c824510e48a93420dbe476d768129f71d188f452ea08d99be56f66feaad83acfe14780f9d5d1fe5dd5d0c933c56ae34029d39561812103'
+      signature: '8b9b8af4ec65aaf53760d23cc2b70aee3e4f79647f10034524106b868b6a6198a80839bd7f83b086799665ae63537ef0f4bda0daad61d9f9942e1dd3c686ad00'
     }
 
     const ApiStub = apiHelper.makeApi(this.opts)
@@ -71,7 +71,7 @@ describe('channelSpec', function () {
       return btpPacket.serializeResponse(requestId, []) // reply to auth message
     })
     this.plugin.addSocket(this.mockSocket, {username: '', token: ''})
-    this.incomingPaymentChannelId = 123456789
+    this.incomingPaymentChannelId = 1234567890
 
     this.payChanIdRequest = [{
       protocolName: 'ripple_channel_id',

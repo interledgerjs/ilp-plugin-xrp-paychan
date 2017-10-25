@@ -100,8 +100,8 @@ module.exports = makePaymentChannelPlugin({
     self.peerAddress = opts.peerAddress
     self.maxUnsecured = opts.maxUnsecured
     self.channelAmount = opts.maxAmount
-    self.fundPercent = opts.fundPercent
-    self.claimPercent = opts.claimPercent
+    // self.fundPercent = opts.fundPercent // TODO: implement automatic increase of channel amount
+    // self.claimPercent = opts.claimPercent // TODO: implement automatic claiming if threshold is reached
     self.prefix = opts.prefix // TODO: auto-generate prefix?
     self.peerPublicKey = opts.peerPublicKey // TODO: read the pub key from the result of getPaymentChannel?
     self.authToken = opts.token
@@ -268,8 +268,7 @@ module.exports = makePaymentChannelPlugin({
     debug(`signing outgoing claim for ${outgoingBalance} drops on ` +
       `channel ${self.outgoingPaymentChannelId}`)
 
-    // issue a fund tx if required
-    //   tell peer about fund tx
+    // TODO: issue a fund tx if self.fundPercent is reached and tell peer about fund tx
 
     // return claim+amount
     return {
@@ -310,7 +309,7 @@ module.exports = makePaymentChannelPlugin({
         ' than channel balance ' + self.incomingPaymentChannel.amount)
     }
 
-    // issue claim tx if required
+    // TODO: issue claim tx if self.claimPercent is exceeded
     // store in max value tracker, throw error if invalid
     await self.incomingClaim.setIfMax({
       value: amount,
