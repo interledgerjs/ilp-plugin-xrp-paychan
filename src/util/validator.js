@@ -85,6 +85,7 @@ function assert (cond, msg) {
 }
 
 function assertType (value, name, type) {
+  // eslint-disable-next-line valid-typeof
   assert(!value || typeof (value) === type,
     name + ' (' + value + ') must be a non-empty ' + type)
 }

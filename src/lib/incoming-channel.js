@@ -69,13 +69,12 @@ module.exports = class IncomingChannel {
     const threshold = new BigNumber(this.max).mul(this._settlePercent)
 
     // TODO: check if this should be claimed
-    if (new BigNumber(outgoingBalance).gt(threshold)) {
+    if (new BigNumber(balance).gt(threshold)) {
       this._claimFunds().catch((e) => { console.error(e) })
     }
   }
 
   async _claimFunds () {
-    const txTag = util.randomTag()
     const bestClaim = await this._bestClaim.getMax()
     const claim = bestClaim.data
     const balance = bestClaim.value
@@ -85,7 +84,7 @@ module.exports = class IncomingChannel {
       balance: util.dropsToXrp(balance),
       channel: this._channelId,
       signature: claim,
-      publicKey: 'ED' + this._publicKey.toString('hex').toUpperCase(),
+      publicKey: 'ED' + this._publicKey.toString('hex').toUpperCase()
     })
 
     debug('signing claim funds tx for balance:', balance.toString())
