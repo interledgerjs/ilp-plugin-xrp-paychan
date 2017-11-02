@@ -11,6 +11,8 @@ const assert = chai.assert
 const expect = chai.expect
 
 const MockSocket = require('ilp-plugin-payment-channel-framework/test/helpers/mockSocket')
+const Store = require('ilp-plugin-payment-channel-framework/test/helpers/objStore')
+
 const apiHelper = require('./helper/apiHelper')
 const btpPacket = require('btp-packet')
 const BigNumber = require('bignumber.js')
@@ -21,7 +23,6 @@ const dropsToXrp = (drops) => new BigNumber(drops).div(1000000).toString()
 describe('channelSpec', function () {
   beforeEach(function () {
     // Plugin Options
-    let store = {}
     this.opts = {
       maxBalance: '1000000000',
       server: 'btp+wss://btp-server.example',
@@ -42,11 +43,7 @@ describe('channelSpec', function () {
       maxUnsecured: '5000000',
       maxAmount: '100000000',
       rpcUri: 'btp+wss://peer.example',
-      _store: {
-        get: async (k) => store[k],
-        put: async (k, v) => { store[k] = v },
-        del: async (k) => delete store[k]
-      }
+      _store: new Store()
     }
     this.claim = {
       amount: 5,
@@ -120,6 +117,56 @@ describe('channelSpec', function () {
         settleDelay: this.opts.settleDelay,
         publicKey: expectedPubKey
       })
+    })
+
+    it('uses existing payment channel', async function () {
+      this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId}) => {
+        return btpPacket.serializeResponse(requestId, this.payChanIdResponse)
+      })
+
+      const outgoingChannel = this.plugin._paychanContext.backend
+        .getMaxValueTracker('outgoing_channel')
+      await outgoingChannel.setIfMax({
+        value: '2', // '2' === STATE_CHANNEL
+        data: '1234567890ABCDEF'
+      })
+
+      const submitSpy = sinon.spy(this.pluginState.api, 'submit')
+      await this.plugin.connect()
+      expect(submitSpy).to.have.not.been.called
+      expect(this.pluginState.outgoingPaymentChannelId)
+        .to.be.equal('1234567890ABCDEF')
+    })
+
+    it('waits for another instance to create a channel', async function () {
+      this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId}) => {
+        return btpPacket.serializeResponse(requestId, this.payChanIdResponse)
+      })
+
+      const realSetTimeout = setTimeout
+      const sleep = (time) => new Promise((resolve) => realSetTimeout(resolve, time))
+      const clock = sinon.useFakeTimers({toFake: ['setTimeout']})
+
+      const outgoingChannel = this.pluginState.outgoingChannel
+      await outgoingChannel.setIfMax({
+        value: '1', // '1' === STATE_CREATING_CHANNEL
+        data: 'ade66de4-9cbf-4f0d-8084-42e10247a4fb'
+      })
+
+      const submitSpy = sinon.spy(this.pluginState.api, 'submit')
+      this.plugin.connect()
+
+      await sleep(10) // wait for the plugin to start polling
+      await outgoingChannel.setIfMax({
+        value: '2', // '2' === STATE_CHANNEL
+        data: '1234567890ABCDEF'
+      })
+      clock.tick(6000)
+      await sleep(10) // wait for the plugin to retrieve the channelId
+
+      expect(submitSpy).to.have.not.been.called
+      expect(this.pluginState.outgoingPaymentChannelId)
+        .to.be.equal('1234567890ABCDEF')
     })
 
     it('requests incoming payment channel id', async function () {

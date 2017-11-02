@@ -13,6 +13,7 @@ const BigNumber = require('bignumber.js')
 const debug = require('debug')('ilp-plugin-xrp-paychan')
 
 // constants
+const DEFAULT_REFUND_THRESHOLD = 0.9
 const DEFAULT_SETTLE_DELAY = 60
 const STATE_NO_CHANNEL = '0'
 const STATE_CREATING_CHANNEL = '1'
@@ -98,10 +99,11 @@ module.exports = makePaymentChannelPlugin({
     self.address = opts.address
     self.secret = opts.secret
     self.peerAddress = opts.peerAddress
+    self.maxAmount = opts.maxAmount
     self.maxUnsecured = opts.maxUnsecured
-    self.channelAmount = opts.maxAmount
-    // self.fundPercent = opts.fundPercent // TODO: implement automatic increase of channel amount
-    // self.claimPercent = opts.claimPercent // TODO: implement automatic claiming if threshold is reached
+    self.fundThreshold = opts.fundThreshold ||
+      new BigNumber(opts.maxAmount).mul(DEFAULT_REFUND_THRESHOLD)
+    // self.claimThreshold = opts.claimThreshold // TODO: implement automatic claiming if threshold is reached
     self.prefix = opts.prefix // TODO: auto-generate prefix?
     self.peerPublicKey = opts.peerPublicKey // TODO: read the pub key from the result of getPaymentChannel?
     self.authToken = opts.token
@@ -129,65 +131,66 @@ module.exports = makePaymentChannelPlugin({
       accounts: [ self.address, self.peerAddress ]
     })
 
-    // establish channel
-    const pluginId = uuid()
-    const tryToCreate = { value: STATE_CREATING_CHANNEL, data: pluginId }
-    const result = await self.outgoingChannel.setIfMax(tryToCreate)
+    // open payment channel
     let channelId
+    const highest = await self.outgoingChannel.getMax()
+    if (highest.value === STATE_CHANNEL) { // channel exists
+      channelId = highest.data
+    } else { // create channel
+      const pluginId = uuid()
+      const tryToCreate = { value: STATE_CREATING_CHANNEL, data: pluginId }
+      const result = await self.outgoingChannel.setIfMax(tryToCreate)
 
-    // if the payment channel has been created already
-    if (result.value === STATE_CHANNEL) {
-      channelId = result.data
-    // if the payment channel has not been created and this process must create it
-    } else if (result.value === STATE_NO_CHANNEL) {
-      // create the channel
-      const txTag = randomTag()
-      let tx
-      try {
-        tx = await self.api.preparePaymentChannelCreate(self.address, {
-          amount: dropsToXrp(self.channelAmount),
-          destination: self.peerAddress,
-          settleDelay: self.settleDelay,
-          publicKey: 'ED' + Buffer.from(self.keyPair.publicKey).toString('hex').toUpperCase(),
-          sourceTag: txTag
-        })
-      } catch (e) {
-        debug('Error preparing payment channel.', e)
-        throw e
-      }
-
-      const signedTx = self.api.sign(tx.txJSON, self.secret)
-      const {resultCode, resultMessage} = await self.api.submit(signedTx.signedTransaction)
-      if (resultCode !== 'tesSUCCESS') {
-        debug('Error creating the payment channel: ', resultMessage)
-      }
-
-      await new Promise((resolve) => {
-        function handleTransaction (ev) {
-          if (ev.transaction.SourceTag !== txTag) return
-          if (ev.transaction.Account !== self.address) return
-
-          channelId = computeChannelId(
-            ev.transaction.Account,
-            ev.transaction.Destination,
-            ev.transaction.Sequence)
-
-          setImmediate(() => self.api.connection
-            .removeListener('transaction', handleTransaction))
-          resolve()
+      // if the payment channel has not been created and this process must create it
+      if (result.value === STATE_NO_CHANNEL) {
+        const txTag = randomTag()
+        let tx
+        try {
+          tx = await self.api.preparePaymentChannelCreate(self.address, {
+            amount: dropsToXrp(self.maxAmount),
+            destination: self.peerAddress,
+            settleDelay: self.settleDelay,
+            publicKey: 'ED' + Buffer.from(self.keyPair.publicKey).toString('hex').toUpperCase(),
+            sourceTag: txTag
+          })
+        } catch (e) {
+          debug('Error preparing payment channel.', e)
+          throw e
         }
 
-        self.api.connection.on('transaction', handleTransaction)
-      })
+        const signedTx = self.api.sign(tx.txJSON, self.secret)
+        const {resultCode, resultMessage} = await self.api.submit(signedTx.signedTransaction)
+        if (resultCode !== 'tesSUCCESS') {
+          debug('Error creating the payment channel: ', resultMessage)
+        }
 
-      // setIfMax 2, channelId
-      await self.outgoingChannel.setIfMax({ value: 2, data: channelId })
+        await new Promise((resolve) => {
+          function handleTransaction (ev) {
+            if (ev.transaction.SourceTag !== txTag) return
+            if (ev.transaction.Account !== self.address) return
 
-    // if another process in currently creating the channel
-    } else if (result.value === STATE_CREATING_CHANNEL) {
-      // poll for channelId
-      while (self.outgoingChannel.getMax().value !== STATE_CHANNEL) { await sleep(5000) }
-      channelId = self.outgoingChannel.getMax().data
+            channelId = computeChannelId(
+              ev.transaction.Account,
+              ev.transaction.Destination,
+              ev.transaction.Sequence)
+
+            setImmediate(() => self.api.connection
+              .removeListener('transaction', handleTransaction))
+            resolve()
+          }
+
+          self.api.connection.on('transaction', handleTransaction)
+        })
+
+        await self.outgoingChannel.setIfMax({ value: STATE_CHANNEL, data: channelId })
+      } else if (result.value === STATE_CREATING_CHANNEL) {
+      // if another process is currently creating the channel poll for channelId
+        debug(`polling for channelId (plugin id ${pluginId})`)
+        while ((await self.outgoingChannel.getMax()).value !== STATE_CHANNEL) {
+          await sleep(5000)
+        }
+        channelId = (await self.outgoingChannel.getMax()).data
+      }
     }
 
     // TODO: recreate channel if it doesn't exist
@@ -216,8 +219,11 @@ module.exports = makePaymentChannelPlugin({
     const self = ctx.state
     // submit latest claim
     const { value, data } = await self.incomingClaim.getMax()
+    const claimedValue = (await self.incomingClaimSubmitted.getMax()).value
     try {
-      await claimFunds(self, value, data)
+      if (claimedValue < value) {
+        await claimFunds(self, value, data)
+      }
     } catch (err) {
       debug(err)
     }
