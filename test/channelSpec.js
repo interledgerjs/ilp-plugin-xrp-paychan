@@ -238,6 +238,44 @@ describe('channelSpec', function () {
     })
   })
 
+  describe('outgoing claim', function () {
+    beforeEach(async function () {
+      this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId}) => {
+        return btpPacket.serializeResponse(requestId, this.payChanIdResponse)
+      })
+      await this.plugin.connect()
+    })
+
+    it('creates a claim', async function () {
+      const expectClaim = {
+        amount: this.pluginState.maxAmount,
+        signature: '130f210260e464e284e6cd35c94b15f100702fa5b6a207c601cc7824fecc37045a484a29c444a769a8349f6f32f448dcce83f90e5413fb3742ac0ed8dbc5950a'
+      }
+      const claim = await this.plugin._paychan.createOutgoingClaim({
+        state: this.pluginState
+      }, this.pluginState.maxAmount)
+      assert.deepEqual(claim, expectClaim)
+    })
+
+    it('adds funding if channel runs dry', async function () {
+      const prepareSpy = sinon.spy(this.pluginState.api, 'preparePaymentChannelFund')
+      const submitSpy = sinon.spy(this.pluginState.api, 'submit')
+
+      await this.plugin._paychan.createOutgoingClaim({
+        state: this.pluginState
+      }, this.pluginState.maxAmount) // exceeds the configured funding threshold
+
+      expect(prepareSpy).to.have.been.calledWith(this.opts.address, {
+        amount: dropsToXrp(this.opts.maxAmount),
+        channel: String(this.pluginState.outgoingPaymentChannelId)
+      })
+      expect(submitSpy).to.have.been.calledWith('1234567890ABCDEF')
+      setImmediate(() => { // wait for the callback to update maxAmount
+        expect(this.pluginState.maxAmount).to.be.equal('200000000')
+      })
+    })
+  })
+
   describe('submits claims', function () {
     beforeEach(async function () {
       this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId}) => {
