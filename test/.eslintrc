@@ -1,0 +1,13 @@
+{
+  "env": {
+    "mocha": true
+  },
+  "extends": "../.eslintrc",
+  "plugins": [
+    "chai-friendly"
+  ],
+  "rules": {
+    "chai-friendly/no-unused-expressions": 2,
+    "no-unused-expressions": 0
+  }
+}

@@ -16,7 +16,7 @@ const PluginRipple = require('ilp-plugin-paychan')
 new PluginRipple({
   // This is the server that ripple-lib submits transactions to.  You can
   // configure this to point at the altnet or to point at the live net.
-  server: 'wss://s.altnet.rippletest.net:51233',
+  rippledServer: 'wss://s.altnet.rippletest.net:51233',
 
   // Your ripple address and secret
   address: 'r33L6z6LMD8Lk39iEQhyXeSWqNN7pFVaM6',

@@ -1,33 +1,38 @@
 {
   "name": "ilp-plugin-xrp-paychan",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"No test specified\"",
-    "lint": "eslint src"
+    "test": "istanbul test -- _mocha",
+    "lint": "eslint ."
   },
   "author": "",
   "license": "ISC",
-  "dependencies": {
-    "base64url": "^2.0.0",
-    "bignum": "^0.12.5",
-    "co-request": "^1.0.0",
-    "eventemitter2": "^3.0.1",
-    "ripple-lib": "^0.17.7",
-    "tweetnacl": "^0.14.5"
-  },
   "devDependencies": {
-    "chai": "^3.5.0",
+    "chai": "^4.1.2",
+    "chai-as-promised": "^7.1.1",
     "co-mocha": "^1.2.0",
+    "eslint": "^4.9.0",
+    "eslint-config-standard": "^10.2.1",
+    "eslint-plugin-chai-friendly": "^0.4.0",
+    "eslint-plugin-import": "^2.7.0",
+    "eslint-plugin-node": "^5.1.0",
+    "eslint-plugin-promise": "^3.5.0",
+    "eslint-plugin-standard": "^3.0.1",
     "istanbul": "^0.4.5",
-    "mocha": "^3.2.0",
-    "nock": "^9.0.6",
-    "uuid": "^3.0.1",
-    "eslint": "^3.3.1",
-    "eslint-config-standard": "^6.0.0",
-    "eslint-plugin-promise": "^3.0.0",
-    "eslint-plugin-standard": "^2.0.1",
-    "five-bells-integration-test-loader": "^1.3.0"
+    "mocha": "^3.5.3",
+    "nock": "^9.0.20",
+    "proxyquire": "^1.8.0",
+    "sinon": "^3.3.0",
+    "sinon-chai": "^2.13.0"
+  },
+  "dependencies": {
+    "bignum": "^0.12.5",
+    "btp-packet": "^1.0.0",
+    "ilp-plugin-payment-channel-framework": "^1.1.3",
+    "ripple-lib": "^0.17.7",
+    "tweetnacl": "^1.0.0",
+    "uuid": "^3.1.0"
   }
 }
