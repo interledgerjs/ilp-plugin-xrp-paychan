@@ -11,6 +11,7 @@ const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest()
 const bignum = require('bignum') // required in order to convert to buffer
 const BigNumber = require('bignumber.js')
 const debug = require('debug')('ilp-plugin-xrp-paychan')
+const assert = require('assert')
 
 // constants
 const DEFAULT_REFUND_THRESHOLD = 0.9
@@ -26,7 +27,9 @@ const randomTag = () => bignum.fromBuffer(crypto.randomBytes(4), {
   size: 4
 }).toNumber()
 
-const dropsToXrp = (drops) => new BigNumber(drops).div(1000000).toString()
+const dropsPerXrp = 1000000
+const dropsToXrp = (drops) => new BigNumber(drops).div(dropsPerXrp).toString()
+const xrpToDrops = (xrp) => new BigNumber(xrp).mul(dropsPerXrp).toString()
 
 const encodeClaim = (amount, id) => Buffer.concat([
   Buffer.from('CLM\0'),
@@ -90,10 +93,22 @@ const claimFunds = async (self, amount, signature) => {
   })
 }
 
+function validateOpts (opts) {
+  // TODO: validate plugin options
+  // mandatory
+
+  // optional
+  if (opts.fundThreshold) {
+    assert(parseFloat(opts.fundThreshold) > 0 && parseFloat(opts.fundThreshold) <= 1)
+  }
+}
+
 module.exports = makePaymentChannelPlugin({
   pluginName: 'xrp-paychan',
 
   constructor: function (ctx, opts) {
+    validateOpts(opts)
+
     const self = ctx.state
     self.api = new RippleAPI({ server: opts.rippledServer })
     self.address = opts.address
@@ -101,8 +116,7 @@ module.exports = makePaymentChannelPlugin({
     self.peerAddress = opts.peerAddress
     self.maxAmount = opts.maxAmount
     self.maxUnsecured = opts.maxUnsecured
-    self.fundThreshold = opts.fundThreshold ||
-      new BigNumber(opts.maxAmount).mul(DEFAULT_REFUND_THRESHOLD)
+    self.fundThreshold = opts.fundThreshold || DEFAULT_REFUND_THRESHOLD
     // self.claimThreshold = opts.claimThreshold // TODO: implement automatic claiming if threshold is reached
     self.prefix = opts.prefix // TODO: auto-generate prefix?
     self.peerPublicKey = opts.peerPublicKey // TODO: read the pub key from the result of getPaymentChannel?
@@ -275,6 +289,37 @@ module.exports = makePaymentChannelPlugin({
       `channel ${self.outgoingPaymentChannelId}`)
 
     // TODO: issue a fund tx if self.fundPercent is reached and tell peer about fund tx
+    if (outgoingBalance > self.maxAmount * self.fundThreshold) {
+      debug('outgoing channel threshold reached, adding more funds')
+      const xrpAmount = dropsToXrp(self.maxAmount)
+      const tx = await self.api.preparePaymentChannelFund(self.address, {
+        amount: xrpAmount,
+        channel: self.outgoingPaymentChannelId
+      })
+
+      debug('submitting channel fund tx', tx)
+      const signedTx = self.api.sign(tx.txJSON, self.secret)
+      const {resultCode, resultMessage} = await self.api.submit(signedTx.signedTransaction)
+      if (resultCode !== 'tesSUCCESS') {
+        debug(`Failed to add ${xrpAmount} XRP to channel ${self.channelId}: `, resultMessage)
+      }
+
+      const handleTransaction = async function (ev) {
+        if (ev.transaction.hash !== signedTx.id) return
+
+        if (ev.engine_result === 'tesSUCCESS') {
+          debug(`successfully funded channel for ${xrpAmount} XRP`)
+          const { amount } = await self.api.getPaymentChannel(self.outgoingPaymentChannelId)
+          self.maxAmount = xrpToDrops(amount)
+        } else {
+          debug('funding channel failed ', ev)
+        }
+
+        setImmediate(() => self.api.connection
+          .removeListener('transaction', handleTransaction))
+      }
+      self.api.connection.on('transaction', handleTransaction)
+    }
 
     // return claim+amount
     return {
