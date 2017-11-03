@@ -96,6 +96,12 @@ const claimFunds = async (self, amount, signature) => {
 function validateOpts (opts) {
   // TODO: validate plugin options
   // mandatory
+  assert(opts.rippledServer, 'rippledServer is required')
+  assert(opts.address, 'address is required')
+  assert(opts.secret, 'secret is required')
+  assert(opts.peerAddress, 'peerAddress is required')
+  assert(opts.maxAmount, 'maxAmount is required')
+  assert(opts.maxUnsecured, 'maxUnsecured is required')
 
   // optional
   if (opts.fundThreshold) {
@@ -110,6 +116,7 @@ module.exports = makePaymentChannelPlugin({
     validateOpts(opts)
 
     const self = ctx.state
+    self.rippledServer = opts.rippledServer
     self.api = new RippleAPI({ server: opts.rippledServer })
     self.address = opts.address
     self.secret = opts.secret
@@ -119,7 +126,6 @@ module.exports = makePaymentChannelPlugin({
     self.fundThreshold = opts.fundThreshold || DEFAULT_REFUND_THRESHOLD
     // self.claimThreshold = opts.claimThreshold // TODO: implement automatic claiming if threshold is reached
     self.prefix = opts.prefix // TODO: auto-generate prefix?
-    self.peerPublicKey = opts.peerPublicKey // TODO: read the pub key from the result of getPaymentChannel?
     self.authToken = opts.token
     self.settleDelay = opts.settleDelay || DEFAULT_SETTLE_DELAY
 
@@ -138,18 +144,26 @@ module.exports = makePaymentChannelPlugin({
 
   connect: async function (ctx) {
     const self = ctx.state
-    await self.api.connect()
+    debug('connecting to rippled server:', self.rippledServer)
+    try {
+      await self.api.connect()
 
-    await self.api.connection.request({
-      command: 'subscribe',
-      accounts: [ self.address, self.peerAddress ]
-    })
+      await self.api.connection.request({
+        command: 'subscribe',
+        accounts: [ self.address, self.peerAddress ]
+      })
+    } catch (err) {
+      debug('error connecting to rippled server', err)
+      throw new Error('Error connecting to rippled server: ' + err.message)
+    }
+    debug('connected to rippled server')
 
     // open payment channel
     let channelId
     const highest = await self.outgoingChannel.getMax()
     if (highest.value === STATE_CHANNEL) { // channel exists
       channelId = highest.data
+      debug('using existing payment channel:', channelId)
     } else { // create channel
       const pluginId = uuid()
       const tryToCreate = { value: STATE_CREATING_CHANNEL, data: pluginId }
@@ -157,6 +171,7 @@ module.exports = makePaymentChannelPlugin({
 
       // if the payment channel has not been created and this process must create it
       if (result.value === STATE_NO_CHANNEL) {
+        debug('creating new payment channel')
         const txTag = randomTag()
         let tx
         try {
@@ -172,12 +187,26 @@ module.exports = makePaymentChannelPlugin({
           throw e
         }
 
+        debug('created paymentChannelCreate tx', tx.txJSON)
+
         const signedTx = self.api.sign(tx.txJSON, self.secret)
-        const {resultCode, resultMessage} = await self.api.submit(signedTx.signedTransaction)
+        let resultCode
+        let resultMessage
+        try {
+          const result = await self.api.submit(signedTx.signedTransaction)
+          resultCode = result.resultCode
+          resultMessage = result.resultMessage
+        } catch (err) {
+          debug('error submitting paymentChannelCreate', err)
+          throw new Error('Error creating payment channel: ' + err.message)
+        }
         if (resultCode !== 'tesSUCCESS') {
-          debug('Error creating the payment channel: ', resultMessage)
+          const message = 'Error creating the payment channel: ' + resultCode + ' ' + resultMessage
+          debug(message)
+          throw new Error(message)
         }
 
+        debug('submitted paymentChannelCreate, waiting for tx to be validated (this may take a few seconds)')
         await new Promise((resolve) => {
           function handleTransaction (ev) {
             if (ev.transaction.SourceTag !== txTag) return
@@ -195,6 +224,7 @@ module.exports = makePaymentChannelPlugin({
 
           self.api.connection.on('transaction', handleTransaction)
         })
+        debug('payment channel successfully created: ', channelId)
 
         await self.outgoingChannel.setIfMax({ value: STATE_CHANNEL, data: channelId })
       } else if (result.value === STATE_CREATING_CHANNEL) {
@@ -213,8 +243,12 @@ module.exports = makePaymentChannelPlugin({
 
     // query peer until they have a channel id
     while (true) {
+      debug('querying peer for their payment channel id')
       self.incomingPaymentChannelId = await ctx.rpc.call('ripple_channel_id', self.prefix, [])
-      if (self.incomingPaymentChannelId) break
+      if (self.incomingPaymentChannelId) {
+        debug('got peer payment channel id:', self.incomingPaymentChannelId)
+        break
+      }
       await sleep(5000)
     }
 
@@ -227,9 +261,11 @@ module.exports = makePaymentChannelPlugin({
       }
       throw err
     }
+    debug('validated that peer payment channel exists')
   },
 
   disconnect: async function (ctx) {
+    debug('disconnecting payment channel')
     const self = ctx.state
     // submit latest claim
     const { value, data } = await self.incomingClaim.getMax()
@@ -273,7 +309,7 @@ module.exports = makePaymentChannelPlugin({
     // make sure channel isn't closing
     // return nothing, or throw an error if invalid
     if (exceeds) {
-      throw new Error(transfer.id + ' exceeds max unsecured balance of ', self.maxUnsecured)
+      throw new Error(transfer.id + ' exceeds max unsecured balance of: ', self.maxUnsecured)
     }
   },
 
@@ -353,11 +389,11 @@ module.exports = makePaymentChannelPlugin({
     }
 
     // validate claim against balance
-    if (new BigNumber(amount).gt(self.incomingPaymentChannel.amount)) {
-      debug('got claim for higher amount', amount,
-        'than channel balance', self.incomingPaymentChannel.amount)
-      throw new Error('got claim for higher amount ' + amount +
-        ' than channel balance ' + self.incomingPaymentChannel.amount)
+    const channelBalance = xrpToDrops(self.incomingPaymentChannel.amount)
+    if (new BigNumber(amount).gt(channelBalance)) {
+      const message = 'got claim for amount higher than channel balance. amount: ' + amount + ', incoming channel balance: ' + channelBalance
+      debug(message)
+      throw new Error(message)
     }
 
     // TODO: issue claim tx if self.claimPercent is exceeded

@@ -40,8 +40,8 @@ describe('channelSpec', function () {
       secret: 'shDssKGbxxpJacxpQzfacKcnutYGU',
       peerAddress: 'rPZUg1NH7gAfkpRpKbcwyn8ET7EPqhTFiv',
       channelSecret: 'shh its a secret',
-      maxUnsecured: '5000000',
-      maxAmount: '100000000',
+      maxUnsecured: '5000',
+      maxAmount: '100000',
       rpcUri: 'btp+wss://peer.example',
       _store: new Store()
     }
@@ -222,19 +222,25 @@ describe('channelSpec', function () {
       assert.equal(max.data, this.claim.signature)
     })
 
-    it('rejects an incoming claim with invalid signature', function () {
+    it('rejects an incoming claim with invalid signature', async function () {
       this.claim.signature = 'INVALID'
-      const promise = this.plugin._paychan
-        .handleIncomingClaim({state: this.pluginState}, this.claim)
-      return expect(promise).to.be.rejectedWith(Error,
-        'got invalid claim signature INVALID for amount 5 drops')
+      try {
+        await this.plugin._paychan.handleIncomingClaim({state: this.pluginState}, this.claim)
+      } catch (err) {
+        assert.equal(err.message, 'got invalid claim signature INVALID for amount 5 drops')
+        return
+      }
+      assert(false, 'should reject claim')
     })
 
-    it('rejects an incoming claim that exceeds the channel amount', function () {
-      const promise = this.plugin._paychan
-        .handleIncomingClaim({state: this.pluginState}, this.exceedingClaim)
-      return expect(promise).to.be.rejectedWith(Error,
-        'got claim for higher amount 5000000 than channel balance 100')
+    it('rejects an incoming claim that exceeds the channel amount', async function () {
+      try {
+        await this.plugin._paychan.handleIncomingClaim({state: this.pluginState}, this.exceedingClaim)
+      } catch (err) {
+        assert.equal(err.message, 'got claim for amount higher than channel balance. amount: 5000000, incoming channel balance: 100000')
+        return
+      }
+      assert(false, 'should reject claim')
     })
   })
 
@@ -249,7 +255,7 @@ describe('channelSpec', function () {
     it('creates a claim', async function () {
       const expectClaim = {
         amount: this.pluginState.maxAmount,
-        signature: '130f210260e464e284e6cd35c94b15f100702fa5b6a207c601cc7824fecc37045a484a29c444a769a8349f6f32f448dcce83f90e5413fb3742ac0ed8dbc5950a'
+        signature: 'fa460348af737eb6071b5793cb1534c3668508b993a34e9069847e39b07e064e62b957e6ed7de3b14bf629cd66662ec37049bc123a9561eb39589496ba7d3001'
       }
       const claim = await this.plugin._paychan.createOutgoingClaim({
         state: this.pluginState
