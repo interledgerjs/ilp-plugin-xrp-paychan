@@ -1,18 +1,5 @@
-# ilp-plugin-xrp-paychan
+'use strict'
 
-Uses payment channels on ripple to do fast ILP transactions between you and a
-peer.  Current in-flight payments are at risk (your peer can choose not to give
-you claims for them), but if the amount in-flight exceeds your `inFlightLimit`,
-you won't acknowledge incoming transfers until you're paid.
-
-**Warning: This plugin is still in a development state, and should not be used with
-live accounts.**
-
-# Example
-
-This is how to instantiate a plugin:
-
-```js
 const PluginRipple = require('ilp-plugin-xrp-paychan')
 const Store = require('ilp-plugin-payment-channel-framework/test/helpers/objStore')
 
@@ -51,6 +38,3 @@ const plugin = new PluginRipple({
 plugin.connect().then(() => {
   // do something with your plugin
 })
-```
-
-For an example of how to send a payment refer to [examples/send-payment.js](https://github.com/ripple/ilp-plugin-xrp-paychan/blob/master/examples/send-payment.js).
