@@ -54,6 +54,7 @@ class ApiMock {
 
   preparePaymentChannelClaim (address, paymentChannelCreate, insructions) {
     this._preparedTransactions.push({
+      engine_result: 'tesSUCCESS',
       transaction: {
         Account: address,
         Channel: paymentChannelCreate.channel,
@@ -70,8 +71,22 @@ class ApiMock {
     }
   }
 
-  _addPreparedTransaction (address, tx) {
+  preparePaymentChannelFund (address, paymentChannelFund, instructions) {
+    this._preparedTransactions.push({
+      engine_result: 'tesSUCCESS',
+      transaction: {
+        hash: '1234567812345678123456781234567812345678123456781234567812345678'
+      }
+    })
 
+    return {
+      txJSON: '"some JSON string"',
+      insructions: {
+        fee: 1,
+        sequence: 1,
+        maxLedgerVersion: null
+      }
+    }
   }
 
   sign () {
