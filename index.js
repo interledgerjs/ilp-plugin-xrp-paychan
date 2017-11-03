@@ -232,13 +232,13 @@ module.exports = makePaymentChannelPlugin({
     // return nothing
   },
 
-  getAccount: ctx => ctx.state.prefix + ctx.state.address,
-  getPeerAccount: ctx => ctx.state.prefix + ctx.state.peerAddress,
+  getAccount: ctx => ctx.plugin._prefix + ctx.state.address,
+  getPeerAccount: ctx => ctx.plugin._prefix + ctx.state.peerAddress,
   getInfo: ctx => ({
     currencyCode: 'XRP',
     currencyScale: 6,
-    prefix: ctx.state.prefix,
-    connectors: [ ctx.state.prefix + ctx.state.peerAddress ]
+    prefix: ctx.plugin._prefix,
+    connectors: [ ctx.plugin._prefix + ctx.state.peerAddress ]
   }),
 
   handleIncomingPrepare: async function (ctx, transfer) {

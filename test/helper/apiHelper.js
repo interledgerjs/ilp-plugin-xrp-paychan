@@ -102,7 +102,7 @@ class ApiMock {
 
 /**
  * Ripple Lib Stub.
- * 
+ *
  * @param  {[Object]} opts [The options of the plugin that will use this stub.]
  * @return {[Class ApiMock]} [A ripple lib stub bound to the passed in plugin options.]
  */
