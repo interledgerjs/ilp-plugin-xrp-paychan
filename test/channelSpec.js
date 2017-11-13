@@ -341,7 +341,7 @@ describe('channelSpec', function () {
     it('creates a claim', async function () {
       const expectClaim = {
         amount: this.pluginState.maxAmount,
-        signature: 'fa460348af737eb6071b5793cb1534c3668508b993a34e9069847e39b07e064e62b957e6ed7de3b14bf629cd66662ec37049bc123a9561eb39589496ba7d3001'
+        signature: '7d23bdbe1fcec7e1b1a535e9df07cc7f50fa6d0e148db3b16d43619fc5e8254085ad622afd1bcee0ef5311d51f0bc23a6d9aacb6893a6ba00b340718420a160d'
       }
       const claim = await this.plugin._paychan.createOutgoingClaim({
         state: this.pluginState

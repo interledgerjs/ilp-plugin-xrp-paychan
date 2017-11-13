@@ -7,7 +7,6 @@ const { makePaymentChannelPlugin } = require('ilp-plugin-payment-channel-framewo
 const uuid = require('uuid')
 const nacl = require('tweetnacl')
 const crypto = require('crypto')
-const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest()
 const bignum = require('bignum') // required in order to convert to buffer
 const BigNumber = require('bignumber.js')
 const debug = require('debug')('ilp-plugin-xrp-paychan')
@@ -15,6 +14,7 @@ const assert = require('assert')
 const moment = require('moment')
 
 // constants
+const CHANNEL_KEYS = 'ilp-plugin-xrp-paychan-channel-keys'
 const DEFAULT_REFUND_THRESHOLD = 0.9
 const {
   STATE_NO_CHANNEL,
@@ -217,6 +217,12 @@ function validateOpts (opts) {
   }
 }
 
+function hmac (key, message) {
+  const h = crypto.createHmac('sha256', key)
+  h.update(message)
+  return h.digest()
+}
+
 module.exports = makePaymentChannelPlugin({
   pluginName: 'xrp-paychan',
 
@@ -237,8 +243,8 @@ module.exports = makePaymentChannelPlugin({
     self.authToken = opts.token
     self.settleDelay = opts.settleDelay || MIN_SETTLE_DELAY
 
-    // TODO: figure out best way to create secure keypair
-    self.keyPair = nacl.sign.keyPair.fromSeed(sha256(Buffer.from(self.secret)))
+    const keyPairSeed = hmac(self.secret, CHANNEL_KEYS + self.peerAddress)
+    self.keyPair = nacl.sign.keyPair.fromSeed(keyPairSeed)
     self.outgoingChannel = ctx.backend.getMaxValueTracker('outgoing_channel')
     self.incomingClaim = ctx.backend.getMaxValueTracker('incoming_claim')
     self.incomingClaimSubmitted = ctx.backend.getMaxValueTracker('incoming_claim_submitted')
