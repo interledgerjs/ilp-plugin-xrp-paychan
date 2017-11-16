@@ -284,6 +284,12 @@ module.exports = makePaymentChannelPlugin({
       debug(err)
     }
 
+    try {
+      self.api.disconnect()
+    } catch (err) {
+      debug('Error disconnecting from rippled', err)
+    }
+
     // TODO: close channel?
     // return nothing
   },
