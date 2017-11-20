@@ -89,7 +89,6 @@ const claimFunds = async (self, amount, signature) => {
         .removeListener('transaction', handleTransaction))
       resolve()
     }
-
     self.api.connection.on('transaction', handleTransaction)
   })
 }
@@ -224,7 +223,7 @@ module.exports = makePaymentChannelPlugin({
           resultMessage = result.resultMessage
         } catch (err) {
           debug('error submitting paymentChannelCreate', err)
-          throw new Error('Error creating payment channel: ' + err.message)
+          throw err
         }
         if (resultCode !== 'tesSUCCESS') {
           const message = 'Error creating the payment channel: ' + resultCode + ' ' + resultMessage
@@ -289,9 +288,6 @@ module.exports = makePaymentChannelPlugin({
     } catch (err) {
       debug('Error disconnecting from rippled', err)
     }
-
-    // TODO: close channel?
-    // return nothing
   },
 
   getAccount: ctx => ctx.plugin._prefix + ctx.state.address,

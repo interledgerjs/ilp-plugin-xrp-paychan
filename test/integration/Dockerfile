@@ -1,0 +1,26 @@
+FROM ubuntu:14.04
+
+# RUN  apt-get update \
+#   && apt-get install -y wget \
+#   && rm -rf /var/lib/apt/lists/* \
+#   && wget https://s3-us-west-2.amazonaws.com/ripple-debs/rippled_0.30.1-b11-1.deb
+# RUN dpkg -i rippled_0.30.1-b11-1.deb
+
+# install rippled
+RUN apt-get update \
+	&& apt-get install -y yum-utils alien \
+	&& rpm -Uvh https://mirrors.ripple.com/ripple-repo-el7.rpm \
+	&& yumdownloader --enablerepo=ripple-stable --releasever=el7 rippled \
+	&& alien -i --scripts rippled*.rpm  \
+	&& rm rippled*.rpm
+
+ADD ./rippled.cfg /etc/
+
+# peer_port
+EXPOSE 51235
+# websocket_public_port
+EXPOSE 5006
+# websocket_port (trusted access)
+EXPOSE 6006
+
+CMD /opt/ripple/bin/rippled -a --start --conf "/etc/rippled.cfg"

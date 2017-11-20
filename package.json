@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "istanbul test -- _mocha",
+    "integration": "istanbul test -- _mocha test/integration",
     "lint": "eslint ."
   },
   "author": "",
