@@ -1,11 +1,5 @@
 FROM ubuntu:14.04
 
-# RUN  apt-get update \
-#   && apt-get install -y wget \
-#   && rm -rf /var/lib/apt/lists/* \
-#   && wget https://s3-us-west-2.amazonaws.com/ripple-debs/rippled_0.30.1-b11-1.deb
-# RUN dpkg -i rippled_0.30.1-b11-1.deb
-
 # install rippled
 RUN apt-get update \
 	&& apt-get install -y yum-utils alien \
