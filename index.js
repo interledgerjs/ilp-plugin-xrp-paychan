@@ -94,6 +94,28 @@ const claimFunds = async (self, amount, signature) => {
   })
 }
 
+async function reloadIncomingChannelDetails (ctx) {
+  const self = ctx.state
+  debug('quering peer for incoming channel id')
+  self.incomingPaymentChannelId = await ctx.rpc.call('ripple_channel_id', self.prefix, [])
+  if (!self.incomingPaymentChannelId) {
+    debug('peer did not return incoming channel id')
+    return
+  }
+
+  // look up channel on ledger
+  try {
+    self.incomingPaymentChannel = await self.api.getPaymentChannel(self.incomingPaymentChannelId)
+    debug('validated that incoming payment channel exists')
+  } catch (err) {
+    if (err.name === 'RippledError' && err.message === 'entryNotFound') {
+      debug('incoming payment channel does not exit:', self.incomingPaymentChannelId)
+    }
+    self.incomingPaymentChannelId = null
+    throw err
+  }
+}
+
 function validateOpts (opts) {
   // TODO: validate plugin options
   // mandatory
@@ -137,6 +159,9 @@ module.exports = makePaymentChannelPlugin({
     self.incomingClaimSubmitted = ctx.backend.getMaxValueTracker('incoming_claim_submitted')
 
     ctx.rpc.addMethod('ripple_channel_id', () => {
+      if (!self.incomingPaymentChannelId) {
+        setImmediate(reloadIncomingChannelDetails.bind(null, ctx))
+      }
       return self.outgoingPaymentChannelId || null
     })
   },
@@ -242,27 +267,7 @@ module.exports = makePaymentChannelPlugin({
     self.outgoingPaymentChannelId = channelId
     self.outgoingPaymentChannel = await self.api.getPaymentChannel(channelId)
 
-    // query peer until they have a channel id
-    while (true) {
-      debug('querying peer for their payment channel id')
-      self.incomingPaymentChannelId = await ctx.rpc.call('ripple_channel_id', self.prefix, [])
-      if (self.incomingPaymentChannelId) {
-        debug('got peer payment channel id:', self.incomingPaymentChannelId)
-        break
-      }
-      await sleep(5000)
-    }
-
-    // look up channel on ledger
-    try {
-      self.incomingPaymentChannel = await self.api.getPaymentChannel(self.incomingPaymentChannelId)
-    } catch (err) {
-      if (err.name === 'RippledError' && err.message === 'entryNotFound') {
-        debug('incoming payment channel does not exit:', self.incomingPaymentChannelId)
-      }
-      throw err
-    }
-    debug('validated that peer payment channel exists')
+    await reloadIncomingChannelDetails(ctx)
   },
 
   disconnect: async function (ctx) {
