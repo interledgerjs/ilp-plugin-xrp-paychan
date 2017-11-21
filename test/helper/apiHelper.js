@@ -113,6 +113,8 @@ class ApiMock {
       publicKey: 'ED' + PEER_PUBLIC_KEY
     }
   }
+
+  async disconnect () {}
 }
 
 /**
