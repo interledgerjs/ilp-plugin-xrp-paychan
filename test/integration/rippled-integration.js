@@ -14,6 +14,7 @@ const PluginRipple = require('../../index.js')
 const RippleAPI = require('ripple-lib').RippleAPI
 const Store = require('ilp-plugin-payment-channel-framework/test/helpers/objStore')
 const {payTo, ledgerAccept} = require('./utils')
+const { sleep, dropsToXrp } = require('../../src/lib/constants')
 
 const SERVER_URL = 'ws://127.0.0.1:6006'
 const COMMON_OPTS = {
@@ -30,17 +31,11 @@ function acceptLedger (api) {
   return api.connection.request({command: 'ledger_accept'})
 }
 
-const dropsPerXrp = 1000000
-const dropsToXrp = (drops) => new BigNumber(drops).div(dropsPerXrp).toString()
-// const xrpToDrops = (xrp) => new BigNumber(xrp).mul(dropsPerXrp).toString()
-
 function setup (server = 'wss://s1.ripple.com') {
   this.api = new RippleAPI({server})
-  console.log('CONNECTING...')
   return this.api.connect().then(() => {
-    console.log('CONNECTED...')
   }, error => {
-    console.log('ERROR:', error)
+    console.log('ERROR connecting to rippled:', error)
     throw error
   })
 }
@@ -51,6 +46,12 @@ function setupAccounts (testcase) {
   return payTo(api, 'rMH4UxPrbuMa1spCBR98hLLyNJp4d8p4tM')
     .then(() => payTo(api, testcase.newWallet.address))
     .then(() => payTo(api, testcase.peer.address))
+}
+
+async function connectPlugins (...plugins) {
+  const promise = Promise.all(plugins.map((p) => p.connect()))
+  await sleep(10) // wait until the plugins have exchanged their channel IDs
+  return promise
 }
 
 async function teardown () {
@@ -150,14 +151,15 @@ describe('plugin integration', function () {
   afterEach(teardown)
 
   describe('connect()', function () {
-    it('is eventually fulfilled', function () {
+    it('is eventually fulfilled', async function () {
       const connectPromise = Promise.all([this.peerPlugin.connect(),
         this.plugin.connect()])
+      await sleep(10)
       return expect(connectPromise).to.be.eventually.fulfilled
     })
 
     it('creates an outgoing paychan', async function () {
-      await Promise.all([this.peerPlugin.connect(), this.plugin.connect()])
+      await connectPlugins(this.peerPlugin, this.plugin)
 
       const paychanid = await this.pluginState.outgoingChannel.getMax()
       const chan = await this.api.getPaymentChannel(paychanid.data)
@@ -173,9 +175,9 @@ describe('plugin integration', function () {
     })
 
     it('has an incoming paychan', async function () {
-      await Promise.all([this.peerPlugin.connect(), this.plugin.connect()])
+      await connectPlugins(this.peerPlugin, this.plugin)
 
-      const paychanid = await this.pluginState.incomingPaymentChannelId
+      const paychanid = this.pluginState.incomingPaymentChannelId
       const chan = await this.api.getPaymentChannel(paychanid)
 
       assert.strictEqual(chan.account, this.peer.address)
@@ -193,7 +195,7 @@ describe('plugin integration', function () {
 
   describe('channel claims and funding', function () {
     beforeEach(async function () {
-      await Promise.all([this.peerPlugin.connect(), this.plugin.connect()])
+      await connectPlugins(this.peerPlugin, this.plugin)
       await this.api.connection.request({
         command: 'subscribe',
         accounts: [ this.newWallet.address, this.peer.address ]

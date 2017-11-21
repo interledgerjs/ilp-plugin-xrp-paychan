@@ -262,7 +262,6 @@ module.exports = makePaymentChannelPlugin({
       }
     }
 
-    // TODO: recreate channel if it doesn't exist
     self.outgoingPaymentChannelId = channelId
     self.outgoingPaymentChannel = await self.api.getPaymentChannel(channelId)
 
