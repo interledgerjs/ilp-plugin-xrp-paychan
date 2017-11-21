@@ -193,7 +193,7 @@ describe('channelSpec', function () {
 
     it('requests incoming payment channel id on ripple_channel_id request', async function () {
       // The first ripple_channel_id request is anwsered with null.
-      // Only on the second ripple_channel_id request the mockSocket returns 
+      // Only on the second ripple_channel_id request the mockSocket returns
       // the channel id.
       this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId, data}) => {
         assert.nestedProperty(data, 'protocolData')
