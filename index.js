@@ -16,20 +16,21 @@ const assert = require('assert')
 // constants
 const DEFAULT_REFUND_THRESHOLD = 0.9
 const DEFAULT_SETTLE_DELAY = 60
-const STATE_NO_CHANNEL = '0'
-const STATE_CREATING_CHANNEL = '1'
-const STATE_CHANNEL = '2'
+const {
+  STATE_NO_CHANNEL,
+  STATE_CREATING_CHANNEL,
+  STATE_CHANNEL,
+  POLLING_INTERVAL,
+  xrpToDrops,
+  dropsToXrp,
+  sleep
+} = require('./src/lib/constants')
 
 // utility functions
-const sleep = (time) => new Promise((resolve) => setTimeout(resolve, time))
 const randomTag = () => bignum.fromBuffer(crypto.randomBytes(4), {
   endian: 'big',
   size: 4
 }).toNumber()
-
-const dropsPerXrp = 1000000
-const dropsToXrp = (drops) => new BigNumber(drops).div(dropsPerXrp).toString()
-const xrpToDrops = (xrp) => new BigNumber(xrp).mul(dropsPerXrp).toString()
 
 const encodeClaim = (amount, id) => Buffer.concat([
   Buffer.from('CLM\0'),
@@ -231,7 +232,7 @@ module.exports = makePaymentChannelPlugin({
       // if another process is currently creating the channel poll for channelId
         debug(`polling for channelId (plugin id ${pluginId})`)
         while ((await self.outgoingChannel.getMax()).value !== STATE_CHANNEL) {
-          await sleep(5000)
+          await sleep(POLLING_INTERVAL)
         }
         channelId = (await self.outgoingChannel.getMax()).data
       }
