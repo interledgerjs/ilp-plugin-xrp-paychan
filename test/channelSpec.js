@@ -15,10 +15,14 @@ const Store = require('ilp-plugin-payment-channel-framework/test/helpers/objStor
 
 const apiHelper = require('./helper/apiHelper')
 const btpPacket = require('btp-packet')
-const BigNumber = require('bignumber.js')
 const proxyquire = require('proxyquire')
-
-const dropsToXrp = (drops) => new BigNumber(drops).div(1000000).toString()
+const {
+  STATE_CREATING_CHANNEL,
+  STATE_CHANNEL,
+  POLLING_INTERVAL,
+  dropsToXrp,
+  sleep
+} = require('../src/lib/constants')
 
 describe('channelSpec', function () {
   beforeEach(function () {
@@ -70,6 +74,11 @@ describe('channelSpec', function () {
     this.plugin.addSocket(this.mockSocket, {username: '', token: ''})
     this.incomingPaymentChannelId = 1234567890
 
+    this.payChanIdRequestNull = [{
+      protocolName: 'ripple_channel_id',
+      contentType: btpPacket.MIME_APPLICATION_JSON,
+      data: Buffer.from(JSON.stringify(null))
+    }]
     this.payChanIdRequest = [{
       protocolName: 'ripple_channel_id',
       contentType: btpPacket.MIME_APPLICATION_JSON,
@@ -127,7 +136,7 @@ describe('channelSpec', function () {
       const outgoingChannel = this.plugin._paychanContext.backend
         .getMaxValueTracker('outgoing_channel')
       await outgoingChannel.setIfMax({
-        value: '2', // '2' === STATE_CHANNEL
+        value: STATE_CHANNEL,
         data: '1234567890ABCDEF'
       })
 
@@ -149,7 +158,7 @@ describe('channelSpec', function () {
 
       const outgoingChannel = this.pluginState.outgoingChannel
       await outgoingChannel.setIfMax({
-        value: '1', // '1' === STATE_CREATING_CHANNEL
+        value: STATE_CREATING_CHANNEL,
         data: 'ade66de4-9cbf-4f0d-8084-42e10247a4fb'
       })
 
@@ -158,18 +167,19 @@ describe('channelSpec', function () {
 
       await sleep(10) // wait for the plugin to start polling
       await outgoingChannel.setIfMax({
-        value: '2', // '2' === STATE_CHANNEL
+        value: STATE_CHANNEL,
         data: '1234567890ABCDEF'
       })
-      clock.tick(6000)
+      clock.tick(POLLING_INTERVAL + 1000)
       await sleep(10) // wait for the plugin to retrieve the channelId
 
       expect(submitSpy).to.have.not.been.called
       expect(this.pluginState.outgoingPaymentChannelId)
         .to.be.equal('1234567890ABCDEF')
+      clock.restore()
     })
 
-    it('requests incoming payment channel id', async function () {
+    it('requests incoming payment channel id on connect()', async function () {
       this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId, data}) => {
         assert.nestedProperty(data, 'protocolData')
         assert.deepEqual(data.protocolData, this.payChanIdRequest)
@@ -177,6 +187,34 @@ describe('channelSpec', function () {
       })
       await this.plugin.connect()
 
+      assert.equal(this.pluginState.incomingPaymentChannelId,
+        this.incomingPaymentChannelId)
+    })
+
+    it('requests incoming payment channel id on ripple_channel_id request', async function () {
+      // The first ripple_channel_id request is anwsered with null.
+      // Only on the second ripple_channel_id request the mockSocket returns 
+      // the channel id.
+      this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId, data}) => {
+        assert.nestedProperty(data, 'protocolData')
+        assert.deepEqual(data.protocolData, this.payChanIdRequest)
+        return btpPacket.serializeResponse(requestId, this.payChanIdRequestNull)
+      }).reply(btpPacket.TYPE_RESPONSE)
+        .reply(btpPacket.TYPE_MESSAGE, ({requestId, data}) => {
+          assert.nestedProperty(data, 'protocolData')
+          assert.deepEqual(data.protocolData, this.payChanIdRequest)
+          return btpPacket.serializeResponse(requestId, this.payChanIdResponse)
+        })
+      await this.plugin.connect()
+
+      // the plugin should not yet have an incoming pay chan id after connect()
+      assert.equal(this.pluginState.incomingPaymentChannelId, null)
+
+      // a ripple_channel_id request should trigger the plugin to try again
+      // to get the incoming payment channel id
+      const btpMessage = btpPacket.serializeMessage(1234, this.payChanIdRequest)
+      this.mockSocket.emit('message', btpMessage)
+      await sleep(10)
       assert.equal(this.pluginState.incomingPaymentChannelId,
         this.incomingPaymentChannelId)
     })
@@ -197,11 +235,7 @@ describe('channelSpec', function () {
 
       await this.plugin.connect()
 
-      const btpMessage = btpPacket.serializeMessage(1234, [{
-        protocolName: 'ripple_channel_id',
-        contentType: btpPacket.MIME_APPLICATION_JSON,
-        data: Buffer.from('[]')
-      }])
+      const btpMessage = btpPacket.serializeMessage(1234, this.payChanIdRequest)
       this.mockSocket.emit('message', btpMessage)
     })
   })
