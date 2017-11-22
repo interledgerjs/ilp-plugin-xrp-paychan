@@ -107,7 +107,7 @@ class ApiMock {
     return {
       account: this._pluginOpts.address,
       destination: this._pluginOpts.peerAddress,
-      amount: new BigNumber(this._pluginOpts.maxAmount).div(1000000),
+      amount: new BigNumber(this._pluginOpts.maxAmount).div(1000000).toString(),
       balance: 0,
       settleDelay: this._pluginOpts.settleDelay,
       publicKey: 'ED' + PEER_PUBLIC_KEY
