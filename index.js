@@ -15,12 +15,12 @@ const assert = require('assert')
 
 // constants
 const DEFAULT_REFUND_THRESHOLD = 0.9
-const DEFAULT_SETTLE_DELAY = 60
 const {
   STATE_NO_CHANNEL,
   STATE_CREATING_CHANNEL,
   STATE_CHANNEL,
-  POLLING_INTERVAL,
+  POLLING_INTERVAL_OUTGOING_PAYCHAN,
+  MIN_SETTLE_DELAY,
   xrpToDrops,
   dropsToXrp,
   sleep
@@ -95,24 +95,48 @@ const claimFunds = async (self, amount, signature) => {
 
 async function reloadIncomingChannelDetails (ctx) {
   const self = ctx.state
-  debug('quering peer for incoming channel id')
-  self.incomingPaymentChannelId = await ctx.rpc.call('ripple_channel_id', self.prefix, [])
   if (!self.incomingPaymentChannelId) {
-    debug('peer did not return incoming channel id')
-    return
+    debug('quering peer for incoming channel id')
+    const chanId = await ctx.rpc.call('ripple_channel_id', self.prefix, [])
+    if (!chanId) {
+      debug('peer did not return incoming channel id')
+      return
+    } else {
+      self.incomingPaymentChannelId = chanId
+    }
   }
 
   // look up channel on ledger
+  debug('retrieving details for incoming channel', self.incomingPaymentChannelId)
   try {
     self.incomingPaymentChannel = await self.api.getPaymentChannel(self.incomingPaymentChannelId)
-    debug('validated that incoming payment channel exists')
+    debug('incoming channel details are:', self.incomingPaymentChannel)
   } catch (err) {
     if (err.name === 'RippledError' && err.message === 'entryNotFound') {
       debug('incoming payment channel does not exit:', self.incomingPaymentChannelId)
     }
-    self.incomingPaymentChannelId = null
     throw err
   }
+
+  const expectedBalance = (await self.incomingClaimSubmitted.getMax()).value
+  const actualBalance = new BigNumber(self.incomingPaymentChannel.balance)
+  if (!actualBalance.equals(expectedBalance)) {
+    debug('Expected the balance of the incoming payment channel to be ' + expectedBalance +
+      ', but it was ' + actualBalance.toString())
+    throw new Error('Unexpected balance of incoming payment channel')
+  }
+
+  // Make sure the watcher has enough time to submit the best 
+  // claim before the channel closes
+  const settleDelay = self.incomingPaymentChannel.settleDelay
+  if (settleDelay < MIN_SETTLE_DELAY) {
+    debug(`incoming payment channel has a too low settle delay of ${settleDelay.toString()}` +
+      ` seconds. Minimum settle delay is ${MIN_SETTLE_DELAY} seconds.`)
+    throw new Error('settle delay of incoming payment channel too low')
+  }
+
+  // TODO: Setup a watcher for the incoming payment channel
+  // that submits the best claim in case the channel is closing
 }
 
 function validateOpts (opts) {
@@ -149,7 +173,7 @@ module.exports = makePaymentChannelPlugin({
     // self.claimThreshold = opts.claimThreshold // TODO: implement automatic claiming if threshold is reached
     self.prefix = opts.prefix // TODO: auto-generate prefix?
     self.authToken = opts.token
-    self.settleDelay = opts.settleDelay || DEFAULT_SETTLE_DELAY
+    self.settleDelay = opts.settleDelay || MIN_SETTLE_DELAY
 
     // TODO: figure out best way to create secure keypair
     self.keyPair = nacl.sign.keyPair.fromSeed(sha256(Buffer.from(self.secret)))
@@ -256,7 +280,7 @@ module.exports = makePaymentChannelPlugin({
       // if another process is currently creating the channel poll for channelId
         debug(`polling for channelId (plugin id ${pluginId})`)
         while ((await self.outgoingChannel.getMax()).value !== STATE_CHANNEL) {
-          await sleep(POLLING_INTERVAL)
+          await sleep(POLLING_INTERVAL_OUTGOING_PAYCHAN)
         }
         channelId = (await self.outgoingChannel.getMax()).data
       }
@@ -306,15 +330,16 @@ module.exports = makePaymentChannelPlugin({
         'before incoming transfers are processed')
     }
 
-    // check that the unsecure amount does not exceed the limit
+    // TODO: 
+    // 1) check that the transfer does not exceed the incoming chan amount
+
+    // check that the unsecured amount does not exceed the limit
     const incoming = await ctx.transferLog.getIncomingFulfilledAndPrepared()
     const amountSecured = await self.incomingClaim.getMax()
     const exceeds = new BigNumber(incoming)
       .minus(amountSecured.value)
       .greaterThan(self.maxUnsecured)
 
-    // make sure channel isn't closing
-    // return nothing, or throw an error if invalid
     if (exceeds) {
       throw new Error(transfer.id + ' exceeds max unsecured balance of: ', self.maxUnsecured)
     }

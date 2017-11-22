@@ -19,7 +19,7 @@ const proxyquire = require('proxyquire')
 const {
   STATE_CREATING_CHANNEL,
   STATE_CHANNEL,
-  POLLING_INTERVAL,
+  POLLING_INTERVAL_OUTGOING_PAYCHAN,
   dropsToXrp,
   sleep
 } = require('../src/lib/constants')
@@ -37,7 +37,7 @@ describe('channelSpec', function () {
         currencyCode: 'XRP',
         connector: []
       },
-      settleDelay: 10,
+      settleDelay: 60 * 60, // 1 hour
       token: 'shared_secret',
       rippledServer: 'wss://s.altnet.rippletest.net:51233',
       address: 'rQBHyjckUFGZK1nPDKzTU8Zyvd2niqHcpo',
@@ -170,7 +170,7 @@ describe('channelSpec', function () {
         value: STATE_CHANNEL,
         data: '1234567890ABCDEF'
       })
-      clock.tick(POLLING_INTERVAL + 1000)
+      clock.tick(POLLING_INTERVAL_OUTGOING_PAYCHAN + 1000)
       await sleep(10) // wait for the plugin to retrieve the channelId
 
       expect(submitSpy).to.have.not.been.called
@@ -217,6 +217,22 @@ describe('channelSpec', function () {
       await sleep(10)
       assert.equal(this.pluginState.incomingPaymentChannelId,
         this.incomingPaymentChannelId)
+    })
+
+    it(`throws if the incoming channel's settleDelay is too low`, function () {
+      this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId, data}) => {
+        assert.nestedProperty(data, 'protocolData')
+        assert.deepEqual(data.protocolData, this.payChanIdRequest)
+        return btpPacket.serializeResponse(requestId, this.payChanIdResponse)
+      })
+
+      const insufficientDelayChannel = Object.assign({},
+        this.pluginState.api.getPaymentChannel(),
+        {settleDelay: 10}
+      )
+      this.pluginState.api.getPaymentChannel = () => Promise.resolve(insufficientDelayChannel)
+      return expect(this.plugin.connect()).to.be
+        .rejectedWith('settle delay of incoming payment channel too low')
     })
 
     it('sends outgoing payment channel id', async function () {

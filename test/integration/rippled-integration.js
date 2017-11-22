@@ -19,7 +19,7 @@ const { sleep, dropsToXrp } = require('../../src/lib/constants')
 const SERVER_URL = 'ws://127.0.0.1:6006'
 const COMMON_OPTS = {
   maxBalance: 'Infinity',
-  settleDelay: 10,
+  settleDelay: 2 * 60 * 60, // 2 hours
   token: 'shared_secret',
   rippledServer: SERVER_URL,
   maxUnsecured: '5000',
