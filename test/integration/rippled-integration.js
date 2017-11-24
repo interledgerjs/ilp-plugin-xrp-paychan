@@ -139,9 +139,10 @@ describe('plugin integration', function () {
     const autoAcceptLedger = (api) => {
       const originalSubmit = api.submit
       api.submit = async (...args) => {
-        const result = originalSubmit.call(api, ...args)
-        setTimeout(acceptLedger.bind(null, this.api), 20)
-        return result
+        return originalSubmit.call(api, ...args).then((result) => {
+          setTimeout(acceptLedger.bind(null, this.api), 20)
+          return result
+        })
       }
     }
 
