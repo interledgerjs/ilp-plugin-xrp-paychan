@@ -12,6 +12,7 @@ const bignum = require('bignum') // required in order to convert to buffer
 const BigNumber = require('bignumber.js')
 const debug = require('debug')('ilp-plugin-xrp-paychan')
 const assert = require('assert')
+const moment = require('moment')
 
 // constants
 const DEFAULT_REFUND_THRESHOLD = 0.9
@@ -95,48 +96,109 @@ const claimFunds = async (self, amount, signature) => {
 
 async function reloadIncomingChannelDetails (ctx) {
   const self = ctx.state
-  if (!self.incomingPaymentChannelId) {
+  let chanId = self.incomingPaymentChannelId
+  let incomingChan = null
+  if (!chanId) {
     debug('quering peer for incoming channel id')
-    const chanId = await ctx.rpc.call('ripple_channel_id', self.prefix, [])
+    chanId = await ctx.rpc.call('ripple_channel_id', self.prefix, [])
     if (!chanId) {
-      debug('peer did not return incoming channel id')
+      debug('cannot load incoming channel. Peer did not return incoming channel id')
       return
-    } else {
-      self.incomingPaymentChannelId = chanId
     }
   }
 
   // look up channel on ledger
-  debug('retrieving details for incoming channel', self.incomingPaymentChannelId)
+  debug('retrieving details for incoming channel', chanId)
   try {
-    self.incomingPaymentChannel = await self.api.getPaymentChannel(self.incomingPaymentChannelId)
-    debug('incoming channel details are:', self.incomingPaymentChannel)
+    incomingChan = await self.api.getPaymentChannel(chanId)
+    debug('incoming channel details are:', incomingChan)
   } catch (err) {
     if (err.name === 'RippledError' && err.message === 'entryNotFound') {
-      debug('incoming payment channel does not exit:', self.incomingPaymentChannelId)
+      debug('incoming payment channel does not exit:', chanId)
     }
     throw err
   }
 
   const expectedBalance = (await self.incomingClaimSubmitted.getMax()).value
-  const actualBalance = new BigNumber(self.incomingPaymentChannel.balance)
+  const actualBalance = new BigNumber(incomingChan.balance)
   if (!actualBalance.equals(expectedBalance)) {
     debug('Expected the balance of the incoming payment channel to be ' + expectedBalance +
       ', but it was ' + actualBalance.toString())
     throw new Error('Unexpected balance of incoming payment channel')
   }
 
-  // Make sure the watcher has enough time to submit the best 
+  // Make sure the watcher has enough time to submit the best
   // claim before the channel closes
-  const settleDelay = self.incomingPaymentChannel.settleDelay
+  const settleDelay = incomingChan.settleDelay
   if (settleDelay < MIN_SETTLE_DELAY) {
     debug(`incoming payment channel has a too low settle delay of ${settleDelay.toString()}` +
       ` seconds. Minimum settle delay is ${MIN_SETTLE_DELAY} seconds.`)
     throw new Error('settle delay of incoming payment channel too low')
   }
 
+  if (incomingChan.cancelAfter) {
+    checkChannelExpiry(incomingChan.cancelAfter)
+  }
+
+  if (incomingChan.expiration) {
+    checkChannelExpiry(incomingChan.expiration)
+  }
+
+  if (incomingChan.destination !== self.address) {
+    debug('incoming channel destination is not our address: ' +
+      incomingChan.destination)
+    throw new Error('Channel destination address wrong')
+  }
+
   // TODO: Setup a watcher for the incoming payment channel
-  // that submits the best claim in case the channel is closing
+  // that submits the best claim before the channel is closing
+
+  self.incomingPaymentChannelId = chanId
+  self.incomingPaymentChannel = incomingChan
+}
+
+function checkChannelExpiry (expiry) {
+  const isAfter = moment().add(MIN_SETTLE_DELAY, 'seconds').isAfter(expiry)
+
+  if (isAfter) {
+    debug('incoming payment channel expires too soon. ' +
+        'Minimum expiry is ' + MIN_SETTLE_DELAY + ' seconds.')
+    throw new Error('incoming channel expires too soon')
+  }
+}
+
+async function fund (self, fundOpts) {
+  debug('outgoing channel threshold reached, adding more funds')
+  const xrpAmount = dropsToXrp(self.maxAmount)
+  const tx = await self.api.preparePaymentChannelFund(self.address, Object.assign({
+    amount: xrpAmount,
+    channel: self.outgoingPaymentChannelId
+  }, fundOpts))
+
+  debug('submitting channel fund tx', tx)
+  const signedTx = self.api.sign(tx.txJSON, self.secret)
+  const {resultCode, resultMessage} = await self.api.submit(signedTx.signedTransaction)
+  if (resultCode !== 'tesSUCCESS') {
+    debug(`Failed to add ${xrpAmount} XRP to channel ${self.channelId}: `, resultMessage)
+  }
+
+  const handleTransaction = async function (ev) {
+    if (ev.transaction.hash !== signedTx.id) return
+
+    if (ev.engine_result === 'tesSUCCESS') {
+      debug(`successfully funded channel for ${xrpAmount} XRP`)
+      const { amount } = await self.api.getPaymentChannel(self.outgoingPaymentChannelId)
+      self.maxAmount = xrpToDrops(amount) // TODO: no side-effects
+    } else {
+      debug('funding channel failed ', ev)
+    }
+
+    setImmediate(() => self.api.connection
+      .removeListener('transaction', handleTransaction))
+  }
+
+  // TODO: handleTransaction is not called back
+  self.api.connection.on('transaction', handleTransaction)
 }
 
 function validateOpts (opts) {
@@ -183,7 +245,13 @@ module.exports = makePaymentChannelPlugin({
 
     ctx.rpc.addMethod('ripple_channel_id', () => {
       if (!self.incomingPaymentChannelId) {
-        setImmediate(reloadIncomingChannelDetails.bind(null, ctx))
+        setImmediate(async () => {
+          try {
+            await reloadIncomingChannelDetails(ctx)
+          } catch (err) {
+            debug('error loading incoming channel', err)
+          }
+        })
       }
       return self.outgoingPaymentChannelId || null
     })
@@ -330,7 +398,7 @@ module.exports = makePaymentChannelPlugin({
         'before incoming transfers are processed')
     }
 
-    // TODO: 
+    // TODO:
     // 1) check that the transfer does not exceed the incoming chan amount
 
     // check that the unsecured amount does not exceed the limit
@@ -358,35 +426,7 @@ module.exports = makePaymentChannelPlugin({
 
     // TODO: issue a fund tx if self.fundPercent is reached and tell peer about fund tx
     if (outgoingBalance > self.maxAmount * self.fundThreshold) {
-      debug('outgoing channel threshold reached, adding more funds')
-      const xrpAmount = dropsToXrp(self.maxAmount)
-      const tx = await self.api.preparePaymentChannelFund(self.address, {
-        amount: xrpAmount,
-        channel: self.outgoingPaymentChannelId
-      })
-
-      debug('submitting channel fund tx', tx)
-      const signedTx = self.api.sign(tx.txJSON, self.secret)
-      const {resultCode, resultMessage} = await self.api.submit(signedTx.signedTransaction)
-      if (resultCode !== 'tesSUCCESS') {
-        debug(`Failed to add ${xrpAmount} XRP to channel ${self.channelId}: `, resultMessage)
-      }
-
-      const handleTransaction = async function (ev) {
-        if (ev.transaction.hash !== signedTx.id) return
-
-        if (ev.engine_result === 'tesSUCCESS') {
-          debug(`successfully funded channel for ${xrpAmount} XRP`)
-          const { amount } = await self.api.getPaymentChannel(self.outgoingPaymentChannelId)
-          self.maxAmount = xrpToDrops(amount)
-        } else {
-          debug('funding channel failed ', ev)
-        }
-
-        setImmediate(() => self.api.connection
-          .removeListener('transaction', handleTransaction))
-      }
-      self.api.connection.on('transaction', handleTransaction)
+      await fund(self)
     }
 
     // return claim+amount
@@ -399,12 +439,16 @@ module.exports = makePaymentChannelPlugin({
   handleIncomingClaim: async function (ctx, claim) {
     // get claim+amount
     const self = ctx.state
+    if (!self.incomingPaymentChannel) await reloadIncomingChannelDetails(ctx)
     const { amount, signature } = claim
     debug(`received claim for ${amount} drops on channel ${self.incomingPaymentChannelId}`)
 
     const encodedClaim = encodeClaim(amount, self.incomingPaymentChannelId)
     let valid = false
     try {
+      // const signature = nacl.sign.detached(encodedClaim, self.keyPair.secretKey)
+      // console.log('ASDFASDF', Buffer.from(signature).toString('hex'))
+
       valid = nacl.sign.detached.verify(
         encodedClaim,
         Buffer.from(signature, 'hex'),

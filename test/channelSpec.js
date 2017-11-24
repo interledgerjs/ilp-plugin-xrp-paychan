@@ -51,11 +51,11 @@ describe('channelSpec', function () {
     }
     this.claim = {
       amount: 5,
-      signature: '1bbcfe0cf035a07a95f90d750daff948fb92e367ba237955d6799d76db6e0a06016da211dce212f4bbc5a88e95d724b316b1f800ed55f648585eb48a16371c09'
+      signature: '87e36f2f3c470f0b9f3dcb81c0ddacc77000a208e861b519716179805a55d5784dfae2a6ec4d68a75c3f190ee7352bcbc9b7191a43d435da598da4d98b544c03'
     }
     this.exceedingClaim = {
       amount: 5000000,
-      signature: '8b9b8af4ec65aaf53760d23cc2b70aee3e4f79647f10034524106b868b6a6198a80839bd7f83b086799665ae63537ef0f4bda0daad61d9f9942e1dd3c686ad00'
+      signature: '428b5744c282895d631da6af8d7472d308227fa885c2b5c2bb587d2a021efaa50b1bae30e60ff3197c894f8f8325835bea9e38631e270ea6d75c8240f2927d04'
     }
 
     const ApiStub = apiHelper.makeApi(this.opts)
@@ -72,13 +72,8 @@ describe('channelSpec', function () {
       return btpPacket.serializeResponse(requestId, []) // reply to auth message
     })
     this.plugin.addSocket(this.mockSocket, {username: '', token: ''})
-    this.incomingPaymentChannelId = 1234567890
+    this.incomingPaymentChannelId = '1234567890ABCDEF'
 
-    this.payChanIdRequestNull = [{
-      protocolName: 'ripple_channel_id',
-      contentType: btpPacket.MIME_APPLICATION_JSON,
-      data: Buffer.from(JSON.stringify(null))
-    }]
     this.payChanIdRequest = [{
       protocolName: 'ripple_channel_id',
       contentType: btpPacket.MIME_APPLICATION_JSON,
@@ -88,6 +83,11 @@ describe('channelSpec', function () {
       protocolName: 'ripple_channel_id',
       contentType: btpPacket.MIME_APPLICATION_JSON,
       data: Buffer.from(`"${this.incomingPaymentChannelId}"`)
+    }]
+    this.payChanIdResponseNull = [{
+      protocolName: 'ripple_channel_id',
+      contentType: btpPacket.MIME_APPLICATION_JSON,
+      data: Buffer.from(JSON.stringify(null))
     }]
   })
 
@@ -198,7 +198,7 @@ describe('channelSpec', function () {
       this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId, data}) => {
         assert.nestedProperty(data, 'protocolData')
         assert.deepEqual(data.protocolData, this.payChanIdRequest)
-        return btpPacket.serializeResponse(requestId, this.payChanIdRequestNull)
+        return btpPacket.serializeResponse(requestId, this.payChanIdResponseNull)
       }).reply(btpPacket.TYPE_RESPONSE)
         .reply(btpPacket.TYPE_MESSAGE, ({requestId, data}) => {
           assert.nestedProperty(data, 'protocolData')
@@ -219,22 +219,6 @@ describe('channelSpec', function () {
         this.incomingPaymentChannelId)
     })
 
-    it(`throws if the incoming channel's settleDelay is too low`, function () {
-      this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId, data}) => {
-        assert.nestedProperty(data, 'protocolData')
-        assert.deepEqual(data.protocolData, this.payChanIdRequest)
-        return btpPacket.serializeResponse(requestId, this.payChanIdResponse)
-      })
-
-      const insufficientDelayChannel = Object.assign({},
-        this.pluginState.api.getPaymentChannel(),
-        {settleDelay: 10}
-      )
-      this.pluginState.api.getPaymentChannel = () => Promise.resolve(insufficientDelayChannel)
-      return expect(this.plugin.connect()).to.be
-        .rejectedWith('settle delay of incoming payment channel too low')
-    })
-
     it('sends outgoing payment channel id', async function () {
       this.mockSocket
         .reply(btpPacket.TYPE_MESSAGE, ({requestId}) => {
@@ -253,6 +237,58 @@ describe('channelSpec', function () {
 
       const btpMessage = btpPacket.serializeMessage(1234, this.payChanIdRequest)
       this.mockSocket.emit('message', btpMessage)
+    })
+
+    describe('validates incoming pay chan', function () {
+      beforeEach(function () {
+        this.originalIncomingChannel = this.pluginState.api
+          .getPaymentChannel(this.incomingPaymentChannelId)
+
+        this.wrongDestinationAddress = Object.assign({}, this.originalIncomingChannel,
+          { destination: 'rNotThisPluginsAddress' })
+        this.cancelAfterTooSoon = Object.assign({}, this.originalIncomingChannel,
+          { cancelAfter: new Date().toISOString() })
+        this.expirationTooSoon = Object.assign({}, this.originalIncomingChannel,
+          { expiration: new Date().toISOString() })
+        this.settleDelayTooLow = Object.assign({}, this.originalIncomingChannel,
+          { settleDelay: 10 })
+
+        this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId}) => {
+          return btpPacket.serializeResponse(requestId, this.payChanIdResponse)
+        })
+      })
+
+      it(`throws if the incoming channel's settleDelay is too low`, function () {
+        sinon.stub(this.pluginState.api, 'getPaymentChannel').onSecondCall()
+          .returns(this.settleDelayTooLow)
+
+        return expect(this.plugin.connect()).to.be
+          .rejectedWith('settle delay of incoming payment channel too low')
+      })
+
+      it('throws if cancelAfter is too soon', function () {
+        sinon.stub(this.pluginState.api, 'getPaymentChannel').onSecondCall()
+          .returns(this.cancelAfterTooSoon)
+
+        return expect(this.plugin.connect()).to.be
+          .rejectedWith('incoming channel expires too soon')
+      })
+
+      it('throws if expiration is too soon', function () {
+        sinon.stub(this.pluginState.api, 'getPaymentChannel').onSecondCall()
+          .returns(this.expirationTooSoon)
+
+        return expect(this.plugin.connect()).to.be
+          .rejectedWith('incoming channel expires too soon')
+      })
+
+      it('throws if destination address is not the plugin\'s', function () {
+        sinon.stub(this.pluginState.api, 'getPaymentChannel').onSecondCall()
+          .returns(this.wrongDestinationAddress)
+
+        return expect(this.plugin.connect()).to.be
+          .rejectedWith('Channel destination address wrong')
+      })
     })
   })
 

@@ -50,7 +50,7 @@ function setupAccounts (testcase) {
 
 async function connectPlugins (...plugins) {
   const promise = Promise.all(plugins.map((p) => p.connect()))
-  await sleep(10) // wait until the plugins have exchanged their channel IDs
+  await sleep(100) // wait until the plugins have exchanged their channel IDs
   return promise
 }
 

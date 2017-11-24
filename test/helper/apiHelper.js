@@ -1,5 +1,6 @@
 'use strict'
 
+const assert = require('chai').assert
 const EventEmitter = require('events').EventEmitter
 const BigNumber = require('bignumber.js')
 
@@ -103,15 +104,28 @@ class ApiMock {
     }
   }
 
-  getPaymentChannel () {
-    return {
-      account: this._pluginOpts.address,
-      destination: this._pluginOpts.peerAddress,
-      amount: new BigNumber(this._pluginOpts.maxAmount).div(1000000).toString(),
-      balance: 0,
-      settleDelay: this._pluginOpts.settleDelay,
-      publicKey: 'ED' + PEER_PUBLIC_KEY
+  getPaymentChannel (id) {
+    if (id === '47888B7F7FFAD1B35C054E928FA249FBE2CE31758FB620A9D2B1505AAF52459C') {
+      return { // outgoing channel
+        account: this._pluginOpts.address,
+        destination: this._pluginOpts.peerAddress,
+        amount: new BigNumber(this._pluginOpts.maxAmount).div(1000000).toString(),
+        balance: 0,
+        settleDelay: this._pluginOpts.settleDelay,
+        publicKey: 'ED' + PEER_PUBLIC_KEY
+      }
+    } else if (id === '1234567890ABCDEF') {
+      return { // incoming channel
+        account: this._pluginOpts.peerAddress,
+        destination: this._pluginOpts.address,
+        amount: new BigNumber(this._pluginOpts.maxAmount).div(1000000).toString(),
+        balance: 0,
+        settleDelay: this._pluginOpts.settleDelay,
+        publicKey: 'ED' + PEER_PUBLIC_KEY
+
+      }
     }
+    assert.fail(0, 1, 'unknown channel id ' + id)
   }
 
   async disconnect () {}
