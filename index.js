@@ -244,7 +244,13 @@ module.exports = makePaymentChannelPlugin({
     // query peer until they have a channel id
     while (true) {
       debug('querying peer for their payment channel id')
-      self.incomingPaymentChannelId = await ctx.rpc.call('ripple_channel_id', self.prefix, [])
+      try {
+        self.incomingPaymentChannelId = await ctx.rpc.call('ripple_channel_id', self.prefix, [])
+      } catch (e) {
+        debug('rpc error getting payment channel id: "' + e.message + '"; retrying in 5000')
+        await sleep(5000)
+        continue
+      }
       if (self.incomingPaymentChannelId) {
         debug('got peer payment channel id:', self.incomingPaymentChannelId)
         break
