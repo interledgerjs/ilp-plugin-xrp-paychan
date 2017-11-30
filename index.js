@@ -252,13 +252,13 @@ module.exports = makePaymentChannelPlugin({
 
     ctx.rpc.addMethod('ripple_channel_id', () => {
       if (!self.incomingPaymentChannelId) {
-        setImmediate(async () => {
+        setTimeout(async () => {
           try {
             await reloadIncomingChannelDetails(ctx)
           } catch (err) {
             ctx.plugin.debug('error loading incoming channel', err)
           }
-        })
+        }, 100)
       }
       return self.outgoingPaymentChannelId || null
     })
@@ -453,9 +453,6 @@ module.exports = makePaymentChannelPlugin({
     const encodedClaim = encodeClaim(amount, self.incomingPaymentChannelId)
     let valid = false
     try {
-      // const signature = nacl.sign.detached(encodedClaim, self.keyPair.secretKey)
-      // console.log('ASDFASDF', Buffer.from(signature).toString('hex'))
-
       valid = nacl.sign.detached.verify(
         encodedClaim,
         Buffer.from(signature, 'hex'),
