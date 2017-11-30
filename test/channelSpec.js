@@ -214,7 +214,12 @@ describe('channelSpec', function () {
       // a ripple_channel_id request should trigger the plugin to try again
       // to get the incoming payment channel id
       const btpMessage = btpPacket.serializeMessage(1234, this.payChanIdRequest)
+
+      const realSetTimeout = setTimeout
+      const sleep = (time) => new Promise((resolve) => realSetTimeout(resolve, time))
+      const clock = sinon.useFakeTimers({toFake: ['setTimeout'], shouldAdvanceTime: true})
       this.mockSocket.emit('message', btpMessage)
+      clock.tick(150)
       await sleep(10)
       assert.equal(this.pluginState.incomingPaymentChannelId,
         this.incomingPaymentChannelId)
