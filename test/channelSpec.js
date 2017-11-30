@@ -66,6 +66,7 @@ describe('channelSpec', function () {
     })
 
     this.plugin = new PluginRipple(this.opts)
+    this.pluginContext = this.plugin._paychanContext
     this.pluginState = this.plugin._paychanContext.state
     this.mockSocket = new MockSocket()
     this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId}) => {
@@ -301,7 +302,7 @@ describe('channelSpec', function () {
     })
 
     it('handles an incoming claim', async function () {
-      await this.plugin._paychan.handleIncomingClaim({state: this.pluginState}, this.claim)
+      await this.plugin._paychan.handleIncomingClaim(this.pluginContext, this.claim)
 
       const max = await this.pluginState.incomingClaim.getMax()
       assert.equal(max.value, this.claim.amount)
@@ -311,7 +312,7 @@ describe('channelSpec', function () {
     it('rejects an incoming claim with invalid signature', async function () {
       this.claim.signature = 'INVALID'
       try {
-        await this.plugin._paychan.handleIncomingClaim({state: this.pluginState}, this.claim)
+        await this.plugin._paychan.handleIncomingClaim(this.pluginContext, this.claim)
       } catch (err) {
         assert.equal(err.message, 'got invalid claim signature INVALID for amount 5 drops')
         return
@@ -321,7 +322,7 @@ describe('channelSpec', function () {
 
     it('rejects an incoming claim that exceeds the channel amount', async function () {
       try {
-        await this.plugin._paychan.handleIncomingClaim({state: this.pluginState}, this.exceedingClaim)
+        await this.plugin._paychan.handleIncomingClaim(this.pluginContext, this.exceedingClaim)
       } catch (err) {
         assert.equal(err.message, 'got claim for amount higher than channel balance. amount: 5000000, incoming channel balance: 100000')
         return
@@ -343,9 +344,7 @@ describe('channelSpec', function () {
         amount: this.pluginState.maxAmount,
         signature: '7d23bdbe1fcec7e1b1a535e9df07cc7f50fa6d0e148db3b16d43619fc5e8254085ad622afd1bcee0ef5311d51f0bc23a6d9aacb6893a6ba00b340718420a160d'
       }
-      const claim = await this.plugin._paychan.createOutgoingClaim({
-        state: this.pluginState
-      }, this.pluginState.maxAmount)
+      const claim = await this.plugin._paychan.createOutgoingClaim(this.pluginContext, this.pluginState.maxAmount)
       assert.deepEqual(claim, expectClaim)
     })
 
@@ -353,9 +352,7 @@ describe('channelSpec', function () {
       const prepareSpy = sinon.spy(this.pluginState.api, 'preparePaymentChannelFund')
       const submitSpy = sinon.spy(this.pluginState.api, 'submit')
 
-      await this.plugin._paychan.createOutgoingClaim({
-        state: this.pluginState
-      }, this.pluginState.maxAmount) // exceeds the configured funding threshold
+      await this.plugin._paychan.createOutgoingClaim(this.pluginContext, this.pluginState.maxAmount) // exceeds the configured funding threshold
 
       expect(prepareSpy).to.have.been.calledWith(this.opts.address, {
         amount: dropsToXrp(this.opts.maxAmount),
@@ -380,7 +377,7 @@ describe('channelSpec', function () {
       const prepareSpy = sinon.spy(this.pluginState.api, 'preparePaymentChannelClaim')
       const submitSpy = sinon.spy(this.pluginState.api, 'submit')
 
-      await this.plugin._paychan.handleIncomingClaim({state: this.pluginState}, this.claim)
+      await this.plugin._paychan.handleIncomingClaim(this.pluginContext, this.claim)
       await this.plugin.disconnect()
 
       expect(prepareSpy).to.be.calledWith(this.opts.address, {
