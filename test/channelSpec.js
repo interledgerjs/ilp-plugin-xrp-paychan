@@ -13,6 +13,9 @@ const expect = chai.expect
 const MockSocket = require('ilp-plugin-payment-channel-framework/test/helpers/mockSocket')
 const Store = require('ilp-plugin-payment-channel-framework/test/helpers/objStore')
 
+const realSetTimeout = setTimeout
+const sleep = (time) => new Promise((resolve) => realSetTimeout(resolve, time))
+
 const apiHelper = require('./helper/apiHelper')
 const btpPacket = require('btp-packet')
 const proxyquire = require('proxyquire')
@@ -20,8 +23,7 @@ const {
   STATE_CREATING_CHANNEL,
   STATE_CHANNEL,
   POLLING_INTERVAL_OUTGOING_PAYCHAN,
-  dropsToXrp,
-  sleep
+  dropsToXrp
 } = require('../src/lib/constants')
 
 describe('channelSpec', function () {
@@ -90,9 +92,12 @@ describe('channelSpec', function () {
       contentType: btpPacket.MIME_APPLICATION_JSON,
       data: Buffer.from(JSON.stringify(null))
     }]
+
+    this.clock = sinon.useFakeTimers({toFake: ['setTimeout'], shouldAdvanceTime: true})
   })
 
   afterEach(async function () {
+    this.clock.restore()
     assert(await this.mockSocket.isDone(), 'request handlers must have been called')
   })
 
@@ -153,10 +158,6 @@ describe('channelSpec', function () {
         return btpPacket.serializeResponse(requestId, this.payChanIdResponse)
       })
 
-      const realSetTimeout = setTimeout
-      const sleep = (time) => new Promise((resolve) => realSetTimeout(resolve, time))
-      const clock = sinon.useFakeTimers({toFake: ['setTimeout']})
-
       const outgoingChannel = this.pluginState.outgoingChannel
       await outgoingChannel.setIfMax({
         value: STATE_CREATING_CHANNEL,
@@ -171,13 +172,12 @@ describe('channelSpec', function () {
         value: STATE_CHANNEL,
         data: '1234567890ABCDEF'
       })
-      clock.tick(POLLING_INTERVAL_OUTGOING_PAYCHAN + 1000)
+      this.clock.tick(POLLING_INTERVAL_OUTGOING_PAYCHAN + 1000)
       await sleep(10) // wait for the plugin to retrieve the channelId
 
       expect(submitSpy).to.have.not.been.called
       expect(this.pluginState.outgoingPaymentChannelId)
         .to.be.equal('1234567890ABCDEF')
-      clock.restore()
     })
 
     it('requests incoming payment channel id on connect()', async function () {
@@ -215,11 +215,8 @@ describe('channelSpec', function () {
       // to get the incoming payment channel id
       const btpMessage = btpPacket.serializeMessage(1234, this.payChanIdRequest)
 
-      const realSetTimeout = setTimeout
-      const sleep = (time) => new Promise((resolve) => realSetTimeout(resolve, time))
-      const clock = sinon.useFakeTimers({toFake: ['setTimeout'], shouldAdvanceTime: true})
       this.mockSocket.emit('message', btpMessage)
-      clock.tick(150)
+      this.clock.tick(150)
       await sleep(10)
       assert.equal(this.pluginState.incomingPaymentChannelId,
         this.incomingPaymentChannelId)
