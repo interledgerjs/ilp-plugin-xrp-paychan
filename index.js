@@ -369,9 +369,7 @@ module.exports = makePaymentChannelPlugin({
     self.outgoingPaymentChannelId = channelId
     self.outgoingPaymentChannel = await self.api.getPaymentChannel(channelId)
 
-    // try {
-      await reloadIncomingChannelDetails(ctx)
-    // } catch (err) { ctx.plugin.debug('error loading incoming channel', err) }
+    await reloadIncomingChannelDetails(ctx)
   },
 
   disconnect: async function (ctx) {
