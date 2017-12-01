@@ -100,7 +100,10 @@ async function reloadIncomingChannelDetails (ctx) {
   let incomingChan = null
   if (!chanId) {
     ctx.plugin.debug('quering peer for incoming channel id')
-    chanId = await ctx.rpc.call('ripple_channel_id', self.prefix, [])
+    try {
+      chanId = await ctx.rpc.call('ripple_channel_id', self.prefix, [])
+    } catch (err) { ctx.plugin.debug(err) }
+
     if (!chanId) {
       ctx.plugin.debug('cannot load incoming channel. Peer did not return incoming channel id')
       return
@@ -114,9 +117,11 @@ async function reloadIncomingChannelDetails (ctx) {
     ctx.plugin.debug('incoming channel details are:', incomingChan)
   } catch (err) {
     if (err.name === 'RippledError' && err.message === 'entryNotFound') {
-      ctx.plugin.debug('incoming payment channel does not exit:', chanId)
+      ctx.plugin.debug('incoming payment channel does not exist:', chanId)
+    } else {
+      ctx.plugin.debug(err)
     }
-    throw err
+    return
   }
 
   const expectedBalance = (await self.incomingClaimSubmitted.getMax()).value
@@ -364,7 +369,9 @@ module.exports = makePaymentChannelPlugin({
     self.outgoingPaymentChannelId = channelId
     self.outgoingPaymentChannel = await self.api.getPaymentChannel(channelId)
 
-    await reloadIncomingChannelDetails(ctx)
+    // try {
+      await reloadIncomingChannelDetails(ctx)
+    // } catch (err) { ctx.plugin.debug('error loading incoming channel', err) }
   },
 
   disconnect: async function (ctx) {
