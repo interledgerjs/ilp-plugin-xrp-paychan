@@ -236,6 +236,7 @@ module.exports = makePaymentChannelPlugin({
     validateOpts(opts)
 
     const self = ctx.state
+    self.incomingChannel = !!opts.incomingChannel
     self.rippledServer = opts.rippledServer
     self.api = new RippleAPI({ server: opts.rippledServer })
     self.address = opts.address
@@ -369,7 +370,9 @@ module.exports = makePaymentChannelPlugin({
     self.outgoingPaymentChannelId = channelId
     self.outgoingPaymentChannel = await self.api.getPaymentChannel(channelId)
 
-    await reloadIncomingChannelDetails(ctx)
+    if (self.incomingChannel) {
+      await reloadIncomingChannelDetails(ctx)
+    }
   },
 
   disconnect: async function (ctx) {
@@ -404,6 +407,10 @@ module.exports = makePaymentChannelPlugin({
 
   handleIncomingPrepare: async function (ctx, transfer) {
     const self = ctx.state
+
+    if (!self.incomingChannel) {
+      throw new Error('This plugin does not have an incoming channel')
+    }
 
     if (self.incomingPaymentChannel === null) {
       throw new Error('incoming payment channel must be established ' +
