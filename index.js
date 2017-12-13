@@ -271,6 +271,11 @@ module.exports = makePaymentChannelPlugin({
   },
 
   getAuthToken: (ctx) => (ctx.state.authToken),
+  getAuthSideProtocols: (ctx) => ([{
+    protocolName: 'channel',
+    contentType: 1,
+    data: Buffer.from(ctx.state.outgoingPaymentChannelId, 'hex')
+  }]),
 
   connect: async function (ctx) {
     const self = ctx.state
