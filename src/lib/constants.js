@@ -7,6 +7,7 @@ const STATE_CREATING_CHANNEL = '1'
 const STATE_CHANNEL = '2'
 const POLLING_INTERVAL_OUTGOING_PAYCHAN = 5000
 const MIN_SETTLE_DELAY = 60 * 60 // = 1h
+const DEFAULT_WATCHER_INTERVAL = 1000 * 60 * 60 // 1 hour
 
 const DROPS_PER_XRP = 1000000
 const dropsToXrp = (drops) => new BigNumber(drops).div(DROPS_PER_XRP).toString()
@@ -20,6 +21,7 @@ module.exports = {
   dropsToXrp,
   xrpToDrops,
   // constants
+  DEFAULT_WATCHER_INTERVAL,
   MIN_SETTLE_DELAY,
   POLLING_INTERVAL_OUTGOING_PAYCHAN,
   STATE_NO_CHANNEL,
