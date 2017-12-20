@@ -294,6 +294,34 @@ describe('channelSpec', function () {
     })
   })
 
+  describe('handleIncomingPrepare', function () {
+    beforeEach(function () {
+      this.transfer = {
+        id: '1d4958c6-eb7f-44ac-8ab7-2d87dee96002',
+        amount: 123456,
+        executionCondition: Buffer.from('27E73D639C4739E9B209BECC9FAED2026F09236E899747B29A6EEBFE6A91C53A', 'hex'),
+        expiresAt: '2017-12-20T16:03:03.763Z',
+        to: 'g.eur.mytrustline.rQBHyjckUFGZK1nPDKzTU8Zyvd2niqHcpo',
+        from: 'g.eur.mytrustline.rPZUg1NH7gAfkpRpKbcwyn8ET7EPqhTFiv',
+        ledger: 'g.eur.mytrustline.'
+      }
+    })
+
+    it('does not accept an incoming prepare without incoming paychan', async function () {
+      this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId, data}) => {
+        return btpPacket.serializeResponse(requestId, this.payChanIdResponseNull)
+      })
+
+      await this.plugin.connect()
+      return expect(this.plugin._paychan.handleIncomingPrepare(this.pluginContext, this.transfer))
+        .to.eventually.be.rejectedWith('incoming payment channel must be established before incoming transfers are processed')
+    })
+
+    it('does not accept an incoming prepare if incoming payhcan is closing', function () {
+      assert(false, 'not implemented')
+    })
+  })
+
   describe('incoming claim', function () {
     beforeEach(async function () {
       this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId}) => {
