@@ -11,11 +11,13 @@ const bignum = require('bignum') // required in order to convert to buffer
 const BigNumber = require('bignumber.js')
 const assert = require('assert')
 const moment = require('moment')
+const { ChannelWatcher } = require('ilp-plugin-xrp-paychan-shared')
 
 // constants
 const CHANNEL_KEYS = 'ilp-plugin-xrp-paychan-channel-keys'
 const DEFAULT_REFUND_THRESHOLD = 0.9
 const {
+  DEFAULT_WATCHER_INTERVAL,
   STATE_NO_CHANNEL,
   STATE_CREATING_CHANNEL,
   STATE_CHANNEL,
@@ -57,8 +59,15 @@ const computeChannelId = (src, dest, sequence) => {
     .toUpperCase()
 }
 
-const claimFunds = async (ctx, amount, signature) => {
+const claimFunds = async (ctx) => {
   const self = ctx.state
+
+  const bestClaim = await self.incomingClaim.getMax()
+  const signature = bestClaim.data
+  const amount = bestClaim.value
+  const claimedValue = (await self.incomingClaimSubmitted.getMax()).value
+  if (claimedValue === amount) return
+
   const tx = await self.api.preparePaymentChannelClaim(self.address, {
     balance: dropsToXrp(amount),
     channel: self.incomingPaymentChannelId,
@@ -155,11 +164,10 @@ async function reloadIncomingChannelDetails (ctx) {
     throw new Error('Channel destination address wrong')
   }
 
-  // TODO: Setup a watcher for the incoming payment channel
-  // that submits the best claim before the channel is closing
-
   self.incomingPaymentChannelId = chanId
   self.incomingPaymentChannel = incomingChan
+
+  self.watcher.watch(chanId)
 }
 
 function checkChannelExpiry (ctx, expiry) {
@@ -254,6 +262,18 @@ module.exports = makePaymentChannelPlugin({
     self.outgoingChannel = ctx.backend.getMaxValueTracker('outgoing_channel')
     self.incomingClaim = ctx.backend.getMaxValueTracker('incoming_claim')
     self.incomingClaimSubmitted = ctx.backend.getMaxValueTracker('incoming_claim_submitted')
+
+    self.watcher = new ChannelWatcher(DEFAULT_WATCHER_INTERVAL, self.api)
+    self.watcher.on('channelClose', async (id) => {
+      if (id === self.incomingPaymentChannelId) {
+        try {
+          await claimFunds(ctx)
+          await reloadIncomingChannelDetails(ctx)
+        } catch (err) {
+          ctx.plugin.debug(`WARNING: Could not claim funds for closing channel ${id}. ` + err)
+        }
+      }
+    })
 
     ctx.rpc.addMethod('ripple_channel_id', () => {
       if (!self.incomingPaymentChannelId) {
@@ -375,13 +395,8 @@ module.exports = makePaymentChannelPlugin({
   disconnect: async function (ctx) {
     const self = ctx.state
     ctx.plugin.debug('disconnecting payment channel')
-    // submit latest claim
-    const { value, data } = await self.incomingClaim.getMax()
-    const claimedValue = (await self.incomingClaimSubmitted.getMax()).value
     try {
-      if (claimedValue < value) {
-        await claimFunds(ctx, value, data)
-      }
+      await claimFunds(ctx)
     } catch (err) {
       ctx.plugin.debug(err)
     }
@@ -412,6 +427,7 @@ module.exports = makePaymentChannelPlugin({
 
     // TODO:
     // 1) check that the transfer does not exceed the incoming chan amount
+    // 2) check that the incoming channel is not closing
 
     // check that the unsecured amount does not exceed the limit
     const incoming = await ctx.transferLog.getIncomingFulfilledAndPrepared()

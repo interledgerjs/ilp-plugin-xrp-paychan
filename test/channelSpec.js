@@ -20,6 +20,7 @@ const apiHelper = require('./helper/apiHelper')
 const btpPacket = require('btp-packet')
 const proxyquire = require('proxyquire')
 const {
+  DEFAULT_WATCHER_INTERVAL,
   STATE_CREATING_CHANNEL,
   STATE_CHANNEL,
   POLLING_INTERVAL_OUTGOING_PAYCHAN,
@@ -67,6 +68,7 @@ describe('channelSpec', function () {
       }
     })
 
+    this.clock = sinon.useFakeTimers({toFake: ['setTimeout', 'setInterval'], shouldAdvanceTime: true})
     this.plugin = new PluginRipple(this.opts)
     this.pluginContext = this.plugin._paychanContext
     this.pluginState = this.plugin._paychanContext.state
@@ -92,8 +94,6 @@ describe('channelSpec', function () {
       contentType: btpPacket.MIME_APPLICATION_JSON,
       data: Buffer.from(JSON.stringify(null))
     }]
-
-    this.clock = sinon.useFakeTimers({toFake: ['setTimeout'], shouldAdvanceTime: true})
   })
 
   afterEach(async function () {
@@ -114,7 +114,6 @@ describe('channelSpec', function () {
 
       await this.plugin.connect()
 
-      expect(connectSpy).to.have.been.calledOnce
       expect(prepareSpy).to.have.been.calledAfter(connectSpy).and
         .calledWith(this.opts.address)
       expect(signSpy).to.have.been.calledAfter(prepareSpy).and
@@ -373,6 +372,29 @@ describe('channelSpec', function () {
         return btpPacket.serializeResponse(requestId, this.payChanIdResponse)
       })
       await this.plugin.connect()
+    })
+
+    it('submits claim if peer closes channel', async function () {
+      const closingChannel = Object.assign({}, this.pluginState.api.getPaymentChannel(this.incomingPaymentChannelId),
+        { expiration: new Date().toISOString() })
+      sinon.stub(this.pluginState.api, 'getPaymentChannel').returns(closingChannel)
+
+      const prepareSpy = sinon.spy(this.pluginState.api, 'preparePaymentChannelClaim')
+      const submitSpy = sinon.spy(this.pluginState.api, 'submit')
+
+      await this.plugin._paychan.handleIncomingClaim(this.pluginContext, this.claim)
+
+      this.clock.tick(DEFAULT_WATCHER_INTERVAL)
+      await sleep(50)
+
+      expect(prepareSpy).to.be.calledWith(this.opts.address, {
+        balance: dropsToXrp(this.claim.amount),
+        channel: String(this.incomingPaymentChannelId),
+        signature: this.claim.signature.toUpperCase(),
+        publicKey: 'ED' + apiHelper.PEER_PUBLIC_KEY
+      })
+      expect(submitSpy).to.be.calledAfter(prepareSpy)
+        .and.calledWith('1234567890ABCDEF')
     })
 
     it('submits claim on disconnect', async function () {
