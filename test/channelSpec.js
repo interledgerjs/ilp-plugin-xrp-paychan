@@ -114,7 +114,8 @@ describe('channelSpec', function () {
 
       await this.plugin.connect()
 
-      expect(connectSpy).to.have.been.calledOnce
+      // called once by plugin, once by watcher
+      expect(connectSpy).to.have.been.calledTwice
       expect(prepareSpy).to.have.been.calledAfter(connectSpy).and
         .calledWith(this.opts.address)
       expect(signSpy).to.have.been.calledAfter(prepareSpy).and
@@ -267,22 +268,6 @@ describe('channelSpec', function () {
 
         return expect(this.plugin.connect()).to.be
           .rejectedWith('settle delay of incoming payment channel too low')
-      })
-
-      it('throws if cancelAfter is too soon', function () {
-        sinon.stub(this.pluginState.api, 'getPaymentChannel').onSecondCall()
-          .returns(this.cancelAfterTooSoon)
-
-        return expect(this.plugin.connect()).to.be
-          .rejectedWith('incoming channel expires too soon')
-      })
-
-      it('throws if expiration is too soon', function () {
-        sinon.stub(this.pluginState.api, 'getPaymentChannel').onSecondCall()
-          .returns(this.expirationTooSoon)
-
-        return expect(this.plugin.connect()).to.be
-          .rejectedWith('incoming channel expires too soon')
       })
 
       it('throws if destination address is not the plugin\'s', function () {
