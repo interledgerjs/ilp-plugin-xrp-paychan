@@ -11,6 +11,7 @@ const bignum = require('bignum') // required in order to convert to buffer
 const BigNumber = require('bignumber.js')
 const assert = require('assert')
 const moment = require('moment')
+const { ChannelWatcher } = require('ilp-plugin-xrp-paychan-shared')
 
 // constants
 const CHANNEL_KEYS = 'ilp-plugin-xrp-paychan-channel-keys'
@@ -155,9 +156,7 @@ async function reloadIncomingChannelDetails (ctx) {
     throw new Error('Channel destination address wrong')
   }
 
-  // TODO: Setup a watcher for the incoming payment channel
-  // that submits the best claim before the channel is closing
-
+  self.watcher.watch(chanId)
   self.incomingPaymentChannelId = chanId
   self.incomingPaymentChannel = incomingChan
 }
@@ -254,6 +253,12 @@ module.exports = makePaymentChannelPlugin({
     self.outgoingChannel = ctx.backend.getMaxValueTracker('outgoing_channel')
     self.incomingClaim = ctx.backend.getMaxValueTracker('incoming_claim')
     self.incomingClaimSubmitted = ctx.backend.getMaxValueTracker('incoming_claim_submitted')
+
+    self.watcher = new ChannelWatcher(10 * 60 * 1000, self.api)
+    self.watcher.on('close', (channelId) => {
+      ctx.plugin.debug('channel closing; triggering disconnect')
+      ctx.plugin.disconnect()
+    })
 
     ctx.rpc.addMethod('ripple_channel_id', () => {
       if (!self.incomingPaymentChannelId) {
