@@ -10,7 +10,6 @@ const crypto = require('crypto')
 const bignum = require('bignum') // required in order to convert to buffer
 const BigNumber = require('bignumber.js')
 const assert = require('assert')
-const moment = require('moment')
 const { ChannelWatcher } = require('ilp-plugin-xrp-paychan-shared')
 
 // constants
@@ -143,11 +142,11 @@ async function reloadIncomingChannelDetails (ctx) {
   }
 
   if (incomingChan.cancelAfter) {
-    checkChannelExpiry(ctx, incomingChan.cancelAfter)
+    throw new Error('incoming channel should not have a hard expiry')
   }
 
   if (incomingChan.expiration) {
-    checkChannelExpiry(ctx, incomingChan.expiration)
+    throw new Error('incoming channel must not already be closing')
   }
 
   if (incomingChan.destination !== self.address) {
@@ -159,16 +158,6 @@ async function reloadIncomingChannelDetails (ctx) {
   self.watcher.watch(chanId)
   self.incomingPaymentChannelId = chanId
   self.incomingPaymentChannel = incomingChan
-}
-
-function checkChannelExpiry (ctx, expiry) {
-  const isAfter = moment().add(MIN_SETTLE_DELAY, 'seconds').isAfter(expiry)
-
-  if (isAfter) {
-    ctx.plugin.debug('incoming payment channel expires too soon. ' +
-        'Minimum expiry is ' + MIN_SETTLE_DELAY + ' seconds.')
-    throw new Error('incoming channel expires too soon')
-  }
 }
 
 async function fund (ctx, fundOpts) {
