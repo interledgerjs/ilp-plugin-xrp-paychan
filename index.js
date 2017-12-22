@@ -10,7 +10,6 @@ const crypto = require('crypto')
 const bignum = require('bignum') // required in order to convert to buffer
 const BigNumber = require('bignumber.js')
 const assert = require('assert')
-const moment = require('moment')
 const { ChannelWatcher } = require('ilp-plugin-xrp-paychan-shared')
 
 // constants
@@ -151,11 +150,11 @@ async function reloadIncomingChannelDetails (ctx) {
   }
 
   if (incomingChan.cancelAfter) {
-    checkChannelExpiry(ctx, incomingChan.cancelAfter)
+    throw new Error('incoming paychan expires (.cancelAfter is set)')
   }
 
   if (incomingChan.expiration) {
-    checkChannelExpiry(ctx, incomingChan.expiration)
+    throw new Error('incoming paychan expires (.expiration is set)')
   }
 
   if (incomingChan.destination !== self.address) {
@@ -168,16 +167,6 @@ async function reloadIncomingChannelDetails (ctx) {
   self.incomingPaymentChannel = incomingChan
 
   self.watcher.watch(chanId)
-}
-
-function checkChannelExpiry (ctx, expiry) {
-  const isAfter = moment().add(MIN_SETTLE_DELAY, 'seconds').isAfter(expiry)
-
-  if (isAfter) {
-    ctx.plugin.debug('incoming payment channel expires too soon. ' +
-        'Minimum expiry is ' + MIN_SETTLE_DELAY + ' seconds.')
-    throw new Error('incoming channel expires too soon')
-  }
 }
 
 async function fund (ctx, fundOpts) {
@@ -265,14 +254,8 @@ module.exports = makePaymentChannelPlugin({
 
     self.watcher = new ChannelWatcher(DEFAULT_WATCHER_INTERVAL, self.api)
     self.watcher.on('channelClose', async (id) => {
-      if (id === self.incomingPaymentChannelId) {
-        try {
-          await claimFunds(ctx)
-          await reloadIncomingChannelDetails(ctx)
-        } catch (err) {
-          ctx.plugin.debug(`WARNING: Could not claim funds for closing channel ${id}. ` + err)
-        }
-      }
+      ctx.plugin.debug('channel closing; triggering disconnect')
+      ctx.plugin.disconnect()
     })
 
     ctx.rpc.addMethod('ripple_channel_id', () => {
@@ -427,11 +410,6 @@ module.exports = makePaymentChannelPlugin({
 
     // TODO:
     // 1) check that the transfer does not exceed the incoming chan amount
-    // 2) check that the incoming channel is not closing
-
-    if (self.incomingPaymentChannel) {
-
-    }
 
     // check that the unsecured amount does not exceed the limit
     const incoming = await ctx.transferLog.getIncomingFulfilledAndPrepared()

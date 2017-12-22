@@ -268,28 +268,22 @@ describe('channelSpec', function () {
           .rejectedWith('settle delay of incoming payment channel too low')
       })
 
-      it('throws if cancelAfter is too soon', function () {
-        sinon.stub(this.pluginState.api, 'getPaymentChannel').onSecondCall()
-          .returns(this.cancelAfterTooSoon)
-
-        return expect(this.plugin.connect()).to.be
-          .rejectedWith('incoming channel expires too soon')
+      it('throws if cancelAfter is set', function () {
+        // onSecondCall() because the first call loads the outoing channel. Only the second loads the incoming channel.
+        sinon.stub(this.pluginState.api, 'getPaymentChannel').onSecondCall().returns(this.cancelAfterTooSoon)
+        return expect(this.plugin.connect()).to.be.rejectedWith('incoming paychan expires (.cancelAfter is set)')
       })
 
       it('throws if expiration is too soon', function () {
-        sinon.stub(this.pluginState.api, 'getPaymentChannel').onSecondCall()
-          .returns(this.expirationTooSoon)
-
-        return expect(this.plugin.connect()).to.be
-          .rejectedWith('incoming channel expires too soon')
+        // onSecondCall() because the first call loads the outoing channel. Only the second loads the incoming channel.
+        sinon.stub(this.pluginState.api, 'getPaymentChannel').onSecondCall().returns(this.expirationTooSoon)
+        return expect(this.plugin.connect()).to.be.rejectedWith('incoming paychan expires (.expiration is set)')
       })
 
       it('throws if destination address is not the plugin\'s', function () {
-        sinon.stub(this.pluginState.api, 'getPaymentChannel').onSecondCall()
-          .returns(this.wrongDestinationAddress)
-
-        return expect(this.plugin.connect()).to.be
-          .rejectedWith('Channel destination address wrong')
+        // onSecondCall() because the first call loads the outoing channel. Only the second loads the incoming channel.
+        sinon.stub(this.pluginState.api, 'getPaymentChannel').onSecondCall().returns(this.wrongDestinationAddress)
+        return expect(this.plugin.connect()).to.be.rejectedWith('Channel destination address wrong')
       })
     })
   })
@@ -315,10 +309,6 @@ describe('channelSpec', function () {
       await this.plugin.connect()
       return expect(this.plugin._paychan.handleIncomingPrepare(this.pluginContext, this.transfer))
         .to.eventually.be.rejectedWith('incoming payment channel must be established before incoming transfers are processed')
-    })
-
-    it('does not accept an incoming prepare if incoming payhcan is closing', function () {
-      assert(false, 'not implemented')
     })
   })
 
@@ -402,27 +392,17 @@ describe('channelSpec', function () {
       await this.plugin.connect()
     })
 
-    it('submits claim if peer closes channel', async function () {
-      const closingChannel = Object.assign({}, this.pluginState.api.getPaymentChannel(this.incomingPaymentChannelId),
-        { expiration: new Date().toISOString() })
-      sinon.stub(this.pluginState.api, 'getPaymentChannel').returns(closingChannel)
+    it.skip('submits a claim if maxUnsecured is exceeded', function () {
 
-      const prepareSpy = sinon.spy(this.pluginState.api, 'preparePaymentChannelClaim')
-      const submitSpy = sinon.spy(this.pluginState.api, 'submit')
+    })
+  })
 
-      await this.plugin._paychan.handleIncomingClaim(this.pluginContext, this.claim)
-
-      this.clock.tick(DEFAULT_WATCHER_INTERVAL)
-      await sleep(50)
-
-      expect(prepareSpy).to.be.calledWith(this.opts.address, {
-        balance: dropsToXrp(this.claim.amount),
-        channel: String(this.incomingPaymentChannelId),
-        signature: this.claim.signature.toUpperCase(),
-        publicKey: 'ED' + apiHelper.PEER_PUBLIC_KEY
+  describe('disconnect', function () {
+    beforeEach(async function () {
+      this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId}) => {
+        return btpPacket.serializeResponse(requestId, this.payChanIdResponse)
       })
-      expect(submitSpy).to.be.calledAfter(prepareSpy)
-        .and.calledWith('1234567890ABCDEF')
+      await this.plugin.connect()
     })
 
     it('submits claim on disconnect', async function () {
@@ -440,6 +420,16 @@ describe('channelSpec', function () {
       })
       expect(submitSpy).to.be.calledAfter(prepareSpy)
         .and.calledWith('1234567890ABCDEF')
+    })
+
+    it('disconnects if incoming channel closes', async function () {
+      const closingChannel = Object.assign({}, this.pluginState.api.getPaymentChannel(this.incomingPaymentChannelId),
+        { expiration: new Date().toISOString() })
+      sinon.stub(this.pluginState.api, 'getPaymentChannel').returns(closingChannel)
+
+      this.clock.tick(DEFAULT_WATCHER_INTERVAL)
+      await sleep(50)
+      assert.isFalse(this.plugin.isConnected())
     })
   })
 })
