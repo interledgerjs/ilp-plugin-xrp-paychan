@@ -83,13 +83,14 @@ const claimFunds = async (ctx) => {
   }
 
   return new Promise((resolve) => {
-    const handleTransaction = function (ev) {
+    const handleTransaction = async function (ev) {
       if (ev.transaction.Account !== self.address) return
       if (ev.transaction.Channel !== self.incomingPaymentChannelId) return
       if (ev.transaction.Balance !== amount) return
 
       if (ev.engine_result === 'tesSUCCESS') {
         ctx.plugin.debug('successfully submitted claim', signature, 'for amount', amount)
+        await self.incomingClaimSubmitted.setIfMax({value: amount, data: signature})
       } else {
         ctx.plugin.debug('claiming funds failed ', ev)
       }
