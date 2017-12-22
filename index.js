@@ -253,9 +253,15 @@ module.exports = makePaymentChannelPlugin({
     self.incomingClaimSubmitted = ctx.backend.getMaxValueTracker('incoming_claim_submitted')
 
     self.watcher = new ChannelWatcher(DEFAULT_WATCHER_INTERVAL, self.api)
-    self.watcher.on('channelClose', async (id) => {
-      ctx.plugin.debug('channel closing; triggering disconnect')
-      ctx.plugin.disconnect()
+    self.watcher.on('channelClose', async (id, paychan) => {
+      ctx.plugin.debug('incoming channel closing; triggering disconnect')
+      self.incomingPaymentChannel = paychan
+      try {
+        ctx.plugin.disconnect()
+      } catch (err) {
+        ctx.plugin.debug('Fatal Error: failed to disconnect. ' +
+          'Operating on an incoming channel that is about to close.')
+      }
     })
 
     ctx.rpc.addMethod('ripple_channel_id', () => {
@@ -406,6 +412,10 @@ module.exports = makePaymentChannelPlugin({
     if (!self.incomingPaymentChannel) {
       throw new Error('incoming payment channel must be established ' +
         'before incoming transfers are processed')
+    }
+
+    if (self.incomingPaymentChannel.expiration) {
+      throw new Error('cannot process transfer for a payment channel that is closing')
     }
 
     // TODO:
