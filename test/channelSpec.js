@@ -27,6 +27,13 @@ const {
   dropsToXrp
 } = require('../src/lib/constants')
 
+async function _connectPlugin () {
+  this.mockSocket.reply(btpPacket.TYPE_MESSAGE, ({requestId}) => {
+    return btpPacket.serializeResponse(requestId, this.payChanIdResponse)
+  })
+  await this.plugin.connect()
+}
+
 describe('channelSpec', function () {
   beforeEach(function () {
     // Plugin Options
@@ -309,6 +316,20 @@ describe('channelSpec', function () {
       await this.plugin.connect()
       return expect(this.plugin._paychan.handleIncomingPrepare(this.pluginContext, this.transfer))
         .to.eventually.be.rejectedWith('incoming payment channel must be established before incoming transfers are processed')
+    })
+
+    it('does not accept an incoming prepare if incoming paychan is closing', async function () {
+      await _connectPlugin.call(this)
+      const closingChannel = Object.assign({}, this.pluginState.api.getPaymentChannel(this.incomingPaymentChannelId),
+        { expiration: new Date().toISOString() })
+      sinon.stub(this.pluginState.api, 'getPaymentChannel').returns(closingChannel)
+      sinon.stub(this.plugin, 'disconnect').throws('something went very wrong')
+
+      this.clock.tick(DEFAULT_WATCHER_INTERVAL)
+      await sleep(50)
+
+      return expect(this.plugin._paychan.handleIncomingPrepare(this.pluginContext, this.transfer))
+        .to.eventually.be.rejectedWith('cannot process transfer for a payment channel that is closing')
     })
   })
 
