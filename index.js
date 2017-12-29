@@ -4,7 +4,7 @@
 const { RippleAPI } = require('ripple-lib')
 const { deriveAddress, deriveKeypair } = require('ripple-keypairs')
 const addressCodec = require('ripple-address-codec')
-const { makePaymentChannelPlugin } = require('ilp-plugin-payment-channel-framework')
+const PluginBtp = require('ilp-plugin-btp')
 const uuid = require('uuid')
 const nacl = require('tweetnacl')
 const crypto = require('crypto')
