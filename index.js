@@ -346,7 +346,7 @@ class PluginXrpPaychan extends PluginBtp {
     }
 
     this._outgoingClaim = {
-      amount: claimAmount.toString()
+      amount: claimAmount.toString(),
       signature: Buffer.from(signature).toString('hex')
     }
 
