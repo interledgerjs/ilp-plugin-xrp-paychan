@@ -11,7 +11,8 @@ const crypto = require('crypto')
 const bignum = require('bignum') // required in order to convert to buffer
 const BigNumber = require('bignumber.js')
 const assert = require('assert')
-const { ChannelWatcher } = require('ilp-plugin-xrp-paychan-shared')
+const moment = require('moment')
+const StoreWrapper = require('./store-wrapper')
 
 // constants
 const CHANNEL_KEYS = 'ilp-plugin-xrp-paychan-channel-keys'
@@ -103,11 +104,12 @@ class PluginXrpPaychan extends PluginBtp {
     const keyPairSeed = hmac(this._secret, CHANNEL_KEYS + this._peerAddress)
     this._keyPair = nacl.sign.keyPair.fromSeed(keyPairSeed)
 
-    this._outgoingChannel = null // TODO: store+cache
+    this._store = new StoreWrapper(opts.store)
+    this._outgoingChannel = null
     this._incomingChannel = null
     this._incomingChannelDetails = null
-    this._incomingClaim = null // TODO: store+cache
-    this._outgoingClaim = { value: '0' } // TODO: store+cache
+    this._incomingClaim = null
+    this._outgoingClaim = null
 
     // TODO: handle incoming channel ID method
   }
@@ -133,6 +135,7 @@ class PluginXrpPaychan extends PluginBtp {
           .filter(p => p.protocolName === 'ripple_channel_id')[0]
           .data
           .toString()
+        this._store.set('incoming_channel', this._incomingChannel)
       } catch (err) { debug(err) }
 
       if (!this._incomingChannel) {
@@ -191,7 +194,14 @@ class PluginXrpPaychan extends PluginBtp {
     })
     debug('connected to rippled')
 
-    this._outgoingChannel = null // TODO: read from cache+store
+    await this._store.load('outgoing_channel')
+    await this._store.load('incoming_claim')
+    await this._store.load('outgoing_claim')
+
+    this._outgoingChannel = this._store.get('outgoing_channel')
+    this._incomingClaim = this._store.get('incoming_claim')
+    this._outgoingClaim = this._store.get('outgoing_claim') || { amount: '0' }
+
     if (!this._outgoingChannel) {
       debug('creating new payment channel')
 
@@ -232,6 +242,7 @@ class PluginXrpPaychan extends PluginBtp {
             ev.transaction.Account,
             ev.transaction.Destination,
             ev.transaction.Sequence)
+          this._store.set('outgoing_channel', this._outgoingChannel)
 
           setImmediate(() => this._api.connection
             .removeListener('transaction', handleTransaction))
@@ -349,6 +360,7 @@ class PluginXrpPaychan extends PluginBtp {
       amount: claimAmount.toString(),
       signature: Buffer.from(signature).toString('hex')
     }
+    this._store.set('outgoing_claim', JSON.stringify(this._outgoingClaim))
 
     await this._call(null, {
       type: BtpPacket.TRANSFER,
@@ -406,6 +418,7 @@ class PluginXrpPaychan extends PluginBtp {
       amount: newAmount,
       signature: claim.signature.toUpperCase()
     }
+    this._store.set('incoming_claim', JSON.stringify(this._incomingClaim))
 
     await this._moneyHandler(amount)
     return []
