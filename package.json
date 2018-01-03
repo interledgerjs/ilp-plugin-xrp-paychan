@@ -31,7 +31,7 @@
   "dependencies": {
     "bignum": "^0.12.5",
     "btp-packet": "^1.2.0",
-    "ilp-plugin-btp": "^1.0.1",
+    "ilp-plugin-btp": "^1.0.2",
     "moment": "^2.19.2",
     "ripple-lib": "^0.17.7",
     "tweetnacl": "^1.0.0",
