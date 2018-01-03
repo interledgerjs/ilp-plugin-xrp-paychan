@@ -18,7 +18,7 @@ const StoreWrapper = require('./store-wrapper')
 const CHANNEL_KEYS = 'ilp-plugin-xrp-paychan-channel-keys'
 const DEFAULT_CHANNEL_AMOUNT = 1000000
 const DEFAULT_BANDWIDTH = 2000
-const DEFAULT_REFUND_THRESHOLD = 0.9
+const DEFAULT_FUND_THRESHOLD = 0.9
 const {
   DEFAULT_WATCHER_INTERVAL,
   STATE_NO_CHANNEL,
