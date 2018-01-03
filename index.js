@@ -1,6 +1,8 @@
 'use strict'
 
 // imports
+const debug = require('debug')('ilp-plugin-xrp-paychan')
+const BtpPacket = require('btp-packet')
 const { RippleAPI } = require('ripple-lib')
 const { deriveAddress, deriveKeypair } = require('ripple-keypairs')
 const addressCodec = require('ripple-address-codec')
@@ -84,7 +86,7 @@ function hmac (key, message) {
   return h.digest()
 }
 
-module.exports = class PluginXrpPaychan extends PluginBtp {
+class PluginXrpPaychan extends PluginBtp {
   constructor (opts) {
     super(opts)
     
@@ -104,7 +106,7 @@ module.exports = class PluginXrpPaychan extends PluginBtp {
     const keyPairSeed = hmac(this._secret, CHANNEL_KEYS + this._peerAddress)
     this._keyPair = nacl.sign.keyPair.fromSeed(keyPairSeed)
 
-    this._store = new StoreWrapper(opts.store)
+    this._store = new StoreWrapper(opts._store)
     this._outgoingChannel = null
     this._incomingChannel = null
     this._incomingChannelDetails = null
@@ -114,17 +116,39 @@ module.exports = class PluginXrpPaychan extends PluginBtp {
     // TODO: handle incoming channel ID method
   }
 
+  async _handleData (from, { requestId, data }) {
+    const { ilp, protocolMap } = this.protocolDataToIlpAndCustom(data)
+
+    if (protocolMap.ripple_channel_id) {
+      this._incomingChannel = protocolMap.ripple_channel_id
+      await this._reloadIncomingChannelDetails()
+
+      return [{
+        protocolName: 'ripple_channel_id',
+        contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+        data: Buffer.from(this._outgoingChannel)
+      }]
+    }
+
+    if (!this._dataHandler) {
+      throw new Error('no request handler registered')
+    }
+
+    const response = await this._dataHandler(ilp)
+    return this.ilpAndCustomToProtocolData({ ilp: response })
+  }
+
   async _reloadIncomingChannelDetails () {
     if (!this._incomingChannel) {
       debug('quering peer for incoming channel id')
       try {
         const response = await this._call(null, {
-          type: BtpPacket.MESSAGE,
+          type: BtpPacket.TYPE_MESSAGE,
           requestId: await _requestId(),
           data: { protocolData: [{
             protocolName: 'ripple_channel_id',
-            contentType: BtpPacket.MIME_APPLICATION_JSON,
-            data: Buffer.from(JSON.stringify([]))
+            contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+            data: Buffer.from(this._outgoingChannel)
           }] }
         })
 
@@ -147,11 +171,11 @@ module.exports = class PluginXrpPaychan extends PluginBtp {
     // look up channel on ledger
     debug('retrieving details for incoming channel', this._incomingChannel)
     try {
-      this._incomingChannelDetails = await this._api.getPaymentChannel(chanId)
-      debug('incoming channel details are:', incomingChan)
+      this._incomingChannelDetails = await this._api.getPaymentChannel(this._incomingChannel)
+      debug('incoming channel details are:', this._incomingChannelDetails)
     } catch (err) {
       if (err.name === 'RippledError' && err.message === 'entryNotFound') {
-        debug('incoming payment channel does not exist:', chanId)
+        debug('incoming payment channel does not exist:', this._incomingChannel)
       } else {
         debug(err)
       }
@@ -199,12 +223,14 @@ module.exports = class PluginXrpPaychan extends PluginBtp {
     await this._store.load('outgoing_claim')
 
     this._outgoingChannel = this._store.get('outgoing_channel')
-    this._incomingClaim = this._store.get('incoming_claim')
+    this._incomingClaim = this._store.get('incoming_claim') || { amount: '0' }
     this._outgoingClaim = this._store.get('outgoing_claim') || { amount: '0' }
+    debug('loaded incoming claim:', this._incomingClaim)
 
     if (!this._outgoingChannel) {
       debug('creating new payment channel')
 
+      const txTag = randomTag()
       const tx = await this._api.preparePaymentChannelCreate(this._address, {
         amount: dropsToXrp(this._channelAmount),
         destination: this._peerAddress,
@@ -215,7 +241,7 @@ module.exports = class PluginXrpPaychan extends PluginBtp {
 
       debug('created paymentChannelCreate tx', tx.txJSON)
 
-      const signedTx = this.api.sign(tx.txJSON, this._secret)
+      const signedTx = this._api.sign(tx.txJSON, this._secret)
       let resultCode
       let resultMessage
       try {
@@ -234,7 +260,7 @@ module.exports = class PluginXrpPaychan extends PluginBtp {
 
       debug('submitted paymentChannelCreate, waiting for tx to be validated (this may take a few seconds)')
       await new Promise((resolve) => {
-        function handleTransaction (ev) {
+        const handleTransaction = (ev) => {
           if (ev.transaction.SourceTag !== txTag) return
           if (ev.transaction.Account !== this._address) return
 
@@ -251,7 +277,7 @@ module.exports = class PluginXrpPaychan extends PluginBtp {
 
         this._api.connection.on('transaction', handleTransaction)
       })
-      debug('payment channel successfully created: ', channelId)
+      debug('payment channel successfully created: ', this._outgoingChannel)
     }
 
     this._outgoingChannelDetails = await this._api.getPaymentChannel(this._outgoingChannel)
@@ -259,11 +285,15 @@ module.exports = class PluginXrpPaychan extends PluginBtp {
   }
 
   async _claimFunds () {
+    if (!this._incomingClaim.signature) {
+      return
+    }
+
     const tx = await this._api.preparePaymentChannelClaim(this._address, {
       balance: dropsToXrp(this._incomingClaim.amount),
       channel: this._incomingChannel,
-      signature: this.incomingClaim.signature.toUpperCase(),
-      publicKey: this.incomingChannelDetails.publicKey
+      signature: this._incomingClaim.signature.toUpperCase(),
+      publicKey: this._incomingChannelDetails.publicKey
     })
 
     const signedTx = this._api.sign(tx.txJSON, this._secret)
@@ -278,10 +308,9 @@ module.exports = class PluginXrpPaychan extends PluginBtp {
       const handleTransaction = (ev) => {
         if (ev.transaction.Account !== this._address) return
         if (ev.transaction.Channel !== this._incomingChannel) return
-        if (ev.transaction.Balance !== amount) return
 
         if (ev.engine_result === 'tesSUCCESS') {
-          debug('successfully submitted claim', signature, 'for amount', amount)
+          debug('successfully submitted claim', this._incomingClaim)
         } else {
           debug('claiming funds failed ', ev)
         }
@@ -349,7 +378,7 @@ module.exports = class PluginXrpPaychan extends PluginBtp {
     debug(`signed outgoing claim for ${claimAmount.toString()} drops on
       channel ${this._outgoingChannel}`)
 
-    if (claimAmount.greaterThan(new BigNumber(this._outgoingChannelDetails.amount).times(this._fundThreshold))) {
+    if (claimAmount.greaterThan(new BigNumber(xrpToDrops(this._outgoingChannelDetails.amount)).times(this._fundThreshold))) {
       this._fund()
         .catch((e) => {
           debug('error issuing fund tx:', e)
@@ -363,7 +392,7 @@ module.exports = class PluginXrpPaychan extends PluginBtp {
     this._store.set('outgoing_claim', JSON.stringify(this._outgoingClaim))
 
     await this._call(null, {
-      type: BtpPacket.TRANSFER,
+      type: BtpPacket.TYPE_TRANSFER,
       requestId: await _requestId(),
       data: {
         amount,
@@ -376,7 +405,9 @@ module.exports = class PluginXrpPaychan extends PluginBtp {
     })
   }
 
-  async _handleMoney (from, { amount, protocolData }) {
+  async _handleMoney (from, { requestId, data }) {
+    const amount = data.amount
+    const protocolData = data.protocolData
     const newAmount = new BigNumber(this._incomingClaim.amount).add(amount)
     const encodedClaim = encodeClaim(newAmount.toString(), this._incomingChannel)
     const claim = JSON.parse(protocolData
@@ -402,7 +433,7 @@ module.exports = class PluginXrpPaychan extends PluginBtp {
       debug(`got invalid claim signature ${claim.signature} for amount
         ${newAmount.toString()} drops`)
       throw new Error('got invalid claim signature ' +
-        signature + ' for amount ' + newAmount.toString() + ' drops')
+        claim.signature + ' for amount ' + newAmount.toString() + ' drops')
     }
 
     // validate claim against balance
@@ -420,7 +451,22 @@ module.exports = class PluginXrpPaychan extends PluginBtp {
     }
     this._store.set('incoming_claim', JSON.stringify(this._incomingClaim))
 
-    await this._moneyHandler(amount)
+    if (this._moneyHandler) {
+      await this._moneyHandler(amount)
+    }
+
     return []
   }
 }
+
+async function _requestId () {
+  return new Promise((resolve, reject) => {
+    crypto.randomBytes(4, (err, buf) => {
+      if (err) reject(err)
+      resolve(buf.readUInt32BE(0))
+    })
+  })
+}
+
+PluginXrpPaychan.version = 2
+module.exports = PluginXrpPaychan
