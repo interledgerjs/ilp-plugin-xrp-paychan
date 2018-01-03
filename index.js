@@ -84,7 +84,7 @@ function hmac (key, message) {
   return h.digest()
 }
 
-class PluginXrpPaychan extends PluginBtp {
+module.exports = class PluginXrpPaychan extends PluginBtp {
   constructor (opts) {
     super(opts)
     
