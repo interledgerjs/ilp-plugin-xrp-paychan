@@ -174,7 +174,6 @@ class PluginXrpPaychan extends PluginBtp {
     debug('retrieving details for incoming channel', this._incomingChannel)
     try {
       this._incomingChannelDetails = await this._api.getPaymentChannel(this._incomingChannel)
-      this._lastClaimedAmount = new BigNumber(xrpToDrops(this._incomingChannelDetails.balance))
       debug('incoming channel details are:', this._incomingChannelDetails)
     } catch (err) {
       if (err.name === 'RippledError' && err.message === 'entryNotFound') {
@@ -210,14 +209,14 @@ class PluginXrpPaychan extends PluginBtp {
       throw new Error('Channel destination address wrong')
     }
 
+    this._lastClaimedAmount = new BigNumber(xrpToDrops(this._incomingChannelDetails.balance))
     this._claimIntervalId = setInterval(async () => {
       if (this._lastClaimedAmount.lessThan(this._incomingClaim.amount)) {
         debug('starting automatic claim. amount=' + this._incomingClaim.amount)
-        this._lastClaimedAmount = this._incomingClaim.amount
+        this._lastClaimedAmount = new BigNumber(this._incomingClaim.amount)
         await this._claimFunds()
         debug('claimed funds.')
       }
-    // TODO: configurable interval
     }, this._claimInterval)
   }
 
