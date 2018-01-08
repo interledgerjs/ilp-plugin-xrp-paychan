@@ -31,7 +31,7 @@ const plugin = new PluginXrpPaychan({
   server: 'btp+ws://:its_a_secret@localhost:666',
 
   // Specify the server that you submit XRP transactions to.
-  rippledServer: 'wss://s.altnet.rippletest.net:51233',
+  xrpServer: 'wss://s.altnet.rippletest.net:51233',
 
   // XRP address and secret
   secret: 's...',

@@ -91,8 +91,8 @@ class PluginXrpPaychan extends PluginBtp {
   constructor (opts) {
     super(opts)
     
-    this._rippledServer = opts.rippledServer // TODO: can default here?
-    this._api = new RippleAPI({ server: opts.rippledServer })
+    this._xrpServer = opts.xrpServer || opts.rippledServer // TODO: deprecate rippledServer
+    this._api = new RippleAPI({ server: this._xrpServer })
     this._secret = opts.secret
     this._address = opts.address || deriveAddress(deriveKeypair(this._secret).publicKey)
 
