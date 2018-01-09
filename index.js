@@ -15,82 +15,21 @@ const BigNumber = require('bignumber.js')
 const assert = require('assert')
 const moment = require('moment')
 const StoreWrapper = require('./store-wrapper')
+const {
+  ChannelWatcher,
+  util
+} = require('ilp-plugin-xrp-paychan-shared')
 
 // constants
 const CHANNEL_KEYS = 'ilp-plugin-xrp-paychan-channel-keys'
 const DEFAULT_CHANNEL_AMOUNT = 1000000
 const DEFAULT_BANDWIDTH = 2000
 const DEFAULT_FUND_THRESHOLD = 0.9
-const DEFAULT_CLAIM_INTERVAL = 5 * 60 * 1000
-const {
-  DEFAULT_WATCHER_INTERVAL,
-  STATE_NO_CHANNEL,
-  STATE_CREATING_CHANNEL,
-  STATE_CHANNEL,
-  POLLING_INTERVAL_OUTGOING_PAYCHAN,
-  MIN_SETTLE_DELAY,
-  xrpToDrops,
-  dropsToXrp,
-  sleep
-} = require('./src/lib/constants')
-
-// utility functions
-const randomTag = () => bignum.fromBuffer(crypto.randomBytes(4), {
-  endian: 'big',
-  size: 4
-}).toNumber()
-
-const encodeClaim = (amount, id) => Buffer.concat([
-  Buffer.from('CLM\0'),
-  Buffer.from(id, 'hex'),
-  bignum(amount).toBuffer({
-    endian: 'big',
-    size: 8
-  })
-])
-
-const computeChannelId = (src, dest, sequence) => {
-  const preimage = Buffer.concat([
-    Buffer.from('\0x', 'ascii'),
-    Buffer.from(addressCodec.decodeAccountID(src)),
-    Buffer.from(addressCodec.decodeAccountID(dest)),
-    bignum(sequence).toBuffer({ endian: 'big', size: 4 })
-  ])
-
-  return crypto.createHash('sha512')
-    .update(preimage)
-    .digest()
-    .slice(0, 32) // first half sha512
-    .toString('hex')
-    .toUpperCase()
-}
-
-function validateOpts (opts) {
-  // TODO: validate plugin options
-  // mandatory
-  assert(opts.rippledServer, 'rippledServer is required')
-  assert(opts.address, 'address is required')
-  assert(opts.secret, 'secret is required')
-  assert(opts.peerAddress, 'peerAddress is required')
-  assert(opts.maxAmount, 'maxAmount is required')
-  assert(opts.maxUnsecured, 'maxUnsecured is required')
-
-  // optional
-  if (opts.fundThreshold) {
-    assert(parseFloat(opts.fundThreshold) > 0 && parseFloat(opts.fundThreshold) <= 1)
-  }
-}
-
-function hmac (key, message) {
-  const h = crypto.createHmac('sha256', key)
-  h.update(message)
-  return h.digest()
-}
 
 class PluginXrpPaychan extends PluginBtp {
   constructor (opts) {
     super(opts)
-    
+
     this._xrpServer = opts.xrpServer || opts.rippledServer // TODO: deprecate rippledServer
     this._api = new RippleAPI({ server: this._xrpServer })
     this._secret = opts.secret
@@ -100,12 +39,10 @@ class PluginXrpPaychan extends PluginBtp {
     this._bandwidth = opts.maxUnsecured || DEFAULT_BANDWIDTH
     this._fundThreshold = opts.fundThreshold || DEFAULT_FUND_THRESHOLD
     this._channelAmount = opts.channelAmount || DEFAULT_CHANNEL_AMOUNT
-    this._claimInterval = opts.claimInterval || DEFAULT_CLAIM_INTERVAL
+    this._claimInterval = opts.claimInterval || util.DEFAULT_CLAIM_INTERVAL
+    this._settleDelay = opts.settleDelay || util.MIN_SETTLE_DELAY
 
-    this._prefix = opts.prefix // TODO: shouldn't be needed at all
-    this._settleDelay = opts.settleDelay || MIN_SETTLE_DELAY
-
-    const keyPairSeed = hmac(this._secret, CHANNEL_KEYS + this._peerAddress)
+    const keyPairSeed = util.hmac(this._secret, CHANNEL_KEYS + this._peerAddress)
     this._keyPair = nacl.sign.keyPair.fromSeed(keyPairSeed)
 
     this._store = new StoreWrapper(opts._store)
@@ -115,7 +52,12 @@ class PluginXrpPaychan extends PluginBtp {
     this._incomingClaim = null
     this._outgoingClaim = null
 
-    // TODO: handle incoming channel ID method
+    this._watcher = new ChannelWatcher(60 * 1000, this._api)
+    this._watcher.on('channelClose', () => {
+      debug('channel closing; triggering auto-disconnect')
+      // TODO: should we also close our own channel?
+      this.disconnect()
+    })
   }
 
   async _handleData (from, { requestId, data }) {
@@ -146,7 +88,7 @@ class PluginXrpPaychan extends PluginBtp {
       try {
         const response = await this._call(null, {
           type: BtpPacket.TYPE_MESSAGE,
-          requestId: await _requestId(),
+          requestId: await util._requestId(),
           data: { protocolData: [{
             protocolName: 'ripple_channel_id',
             contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
@@ -187,9 +129,9 @@ class PluginXrpPaychan extends PluginBtp {
     // Make sure the watcher has enough time to submit the best
     // claim before the channel closes
     const settleDelay = this._incomingChannelDetails.settleDelay
-    if (settleDelay < MIN_SETTLE_DELAY) {
+    if (settleDelay < util.MIN_SETTLE_DELAY) {
       debug(`incoming payment channel has a too low settle delay of ${settleDelay.toString()}
-        seconds. Minimum settle delay is ${MIN_SETTLE_DELAY} seconds.`)
+        seconds. Minimum settle delay is ${util.MIN_SETTLE_DELAY} seconds.`)
       throw new Error('settle delay of incoming payment channel too low')
     }
 
@@ -209,7 +151,7 @@ class PluginXrpPaychan extends PluginBtp {
       throw new Error('Channel destination address wrong')
     }
 
-    this._lastClaimedAmount = new BigNumber(xrpToDrops(this._incomingChannelDetails.balance))
+    this._lastClaimedAmount = new BigNumber(util.xrpToDrops(this._incomingChannelDetails.balance))
     this._claimIntervalId = setInterval(async () => {
       if (this._lastClaimedAmount.lessThan(this._incomingClaim.amount)) {
         debug('starting automatic claim. amount=' + this._incomingClaim.amount)
@@ -242,9 +184,9 @@ class PluginXrpPaychan extends PluginBtp {
     if (!this._outgoingChannel) {
       debug('creating new payment channel')
 
-      const txTag = randomTag()
+      const txTag = util.randomTag()
       const tx = await this._api.preparePaymentChannelCreate(this._address, {
-        amount: dropsToXrp(this._channelAmount),
+        amount: util.dropsToXrp(this._channelAmount),
         destination: this._peerAddress,
         settleDelay: this._settleDelay,
         publicKey: 'ED' + Buffer.from(this._keyPair.publicKey).toString('hex').toUpperCase(),
@@ -276,7 +218,7 @@ class PluginXrpPaychan extends PluginBtp {
           if (ev.transaction.SourceTag !== txTag) return
           if (ev.transaction.Account !== this._address) return
 
-          this._outgoingChannel = computeChannelId(
+          this._outgoingChannel = util.computeChannelId(
             ev.transaction.Account,
             ev.transaction.Destination,
             ev.transaction.Sequence)
@@ -302,7 +244,7 @@ class PluginXrpPaychan extends PluginBtp {
     }
 
     const tx = await this._api.preparePaymentChannelClaim(this._address, {
-      balance: dropsToXrp(this._incomingClaim.amount),
+      balance: util.dropsToXrp(this._incomingClaim.amount),
       channel: this._incomingChannel,
       signature: this._incomingClaim.signature.toUpperCase(),
       publicKey: this._incomingChannelDetails.publicKey
@@ -351,48 +293,22 @@ class PluginXrpPaychan extends PluginBtp {
     }
   }
 
-  async _fund () {
-    debug('outgoing channel threshold reached, adding more funds')
-    const xrpAmount = dropsToXrp(this._channelAmount)
-    const tx = await this._api.preparePaymentChannelFund(this._address, {
-      amount: xrpAmount,
-      channel: this._outgoingChannel
-    })
-
-    debug('submitting channel fund tx', tx)
-    const signedTx = this._api.sign(tx.txJSON, this._secret)
-    const { resultCode, resultMessage } = await this._api.submit(signedTx.signedTransaction)
-    if (resultCode !== 'tesSUCCESS') {
-      debug(`Failed to add ${xrpAmount} XRP to channel ${this._outgoingChannel}: `, resultMessage)
-    }
-
-    const handleTransaction = async (ev) => {
-      if (ev.transaction.hash !== signedTx.id) return
-
-      if (ev.engine_result === 'tesSUCCESS') {
-        debug(`successfully funded channel for ${xrpAmount} XRP`)
-        this._outgoingChannelDetails = await this._api.getPaymentChannel(this._outgoingChannel)
-      } else {
-        debug('funding channel failed ', ev)
-      }
-
-      setImmediate(() => this._api.connection
-        .removeListener('transaction', handleTransaction))
-    }
-
-    this._api.connection.on('transaction', handleTransaction)
-  }
-
   async sendMoney (amount) {
     const claimAmount = new BigNumber(this._outgoingClaim.amount).add(amount)
-    const encodedClaim = encodeClaim(claimAmount, this._outgoingChannel)
+    const encodedClaim = util.encodeClaim(claimAmount, this._outgoingChannel)
     const signature = nacl.sign.detached(encodedClaim, this._keyPair.secretKey)
 
     debug(`signed outgoing claim for ${claimAmount.toString()} drops on
       channel ${this._outgoingChannel}`)
 
-    if (claimAmount.greaterThan(new BigNumber(xrpToDrops(this._outgoingChannelDetails.amount)).times(this._fundThreshold))) {
-      this._fund()
+    if (claimAmount.greaterThan(new BigNumber(util.xrpToDrops(this._outgoingChannelDetails.amount)).times(this._fundThreshold))) {
+      util.fundChannel({
+        api: this._api,
+        channel: this._outgoingChannel,
+        amount: this._channelAmount,
+        address: this._address,
+        secret: this._secret
+      })
         .catch((e) => {
           debug('error issuing fund tx:', e)
         })
@@ -406,7 +322,7 @@ class PluginXrpPaychan extends PluginBtp {
 
     await this._call(null, {
       type: BtpPacket.TYPE_TRANSFER,
-      requestId: await _requestId(),
+      requestId: await util._requestId(),
       data: {
         amount,
         protocolData: [{
@@ -422,7 +338,7 @@ class PluginXrpPaychan extends PluginBtp {
     const amount = data.amount
     const protocolData = data.protocolData
     const newAmount = new BigNumber(this._incomingClaim.amount).add(amount)
-    const encodedClaim = encodeClaim(newAmount.toString(), this._incomingChannel)
+    const encodedClaim = util.encodeClaim(newAmount.toString(), this._incomingChannel)
     const claim = JSON.parse(protocolData
       .filter(p => p.protocolName === 'claim')[0]
       .data
@@ -450,7 +366,7 @@ class PluginXrpPaychan extends PluginBtp {
     }
 
     // validate claim against balance
-    const channelBalance = xrpToDrops(this._incomingChannelDetails.amount)
+    const channelBalance = util.xrpToDrops(this._incomingChannelDetails.amount)
     if (newAmount.greaterThan(channelBalance)) {
       const message = `got claim for amount higher than channel balance. amount:
         ${amount} incoming channel balance: ${channelBalance}`
@@ -470,15 +386,6 @@ class PluginXrpPaychan extends PluginBtp {
 
     return []
   }
-}
-
-async function _requestId () {
-  return new Promise((resolve, reject) => {
-    crypto.randomBytes(4, (err, buf) => {
-      if (err) reject(err)
-      resolve(buf.readUInt32BE(0))
-    })
-  })
 }
 
 PluginXrpPaychan.version = 2
