@@ -177,8 +177,8 @@ class PluginXrpPaychan extends PluginBtp {
     await this._store.load('outgoing_claim')
 
     this._outgoingChannel = this._store.get('outgoing_channel')
-    this._incomingClaim = this._store.get('incoming_claim') || { amount: '0' }
-    this._outgoingClaim = this._store.get('outgoing_claim') || { amount: '0' }
+    this._incomingClaim = JSON.parse(this._store.get('incoming_claim') || '{"amount":"0"}')
+    this._outgoingClaim = JSON.parse(this._store.get('outgoing_claim') || '{"amount":"0"}')
     debug('loaded incoming claim:', this._incomingClaim)
 
     if (!this._outgoingChannel) {
