@@ -337,14 +337,30 @@ class PluginXrpPaychan extends PluginBtp {
   async _handleMoney (from, { requestId, data }) {
     const amount = data.amount
     const protocolData = data.protocolData
-    const newAmount = new BigNumber(this._incomingClaim.amount).add(amount)
-    const encodedClaim = util.encodeClaim(newAmount.toString(), this._incomingChannel)
     const claim = JSON.parse(protocolData
       .filter(p => p.protocolName === 'claim')[0]
       .data
       .toString())
 
-    debug(`received claim for ${claim.amount} drops on channel ${this._incomingChannel}`)
+    const claimAmount = new BigNumber(claim.amount)
+    const encodedClaim = util.encodeClaim(claim.amount, this._incomingChannel)
+    const addedMoney = claimAmount.minus(this._incomingClaim.amount)
+
+    if (addedMoney <= 0) {
+      throw new Error('new claim is less than old claim. new=' + claim.amount +
+        ' old=' + this._incomingClaim.amount)
+    }
+
+    // Don't throw an error here; we'll just emit the addedMoney amount and keep going.
+    // This can happen during high throughput when transfers may get out of sync with
+    // settlements. So long as one peer doesn't crash before balances are written, the
+    // discrepency should go away automatically.
+    if (!addedMoney.equals(amount)) {
+      debug('warning: peer balance is out of sync with ours. peer thinks they sent ' +
+        amount + '; we got ' + addedMoney.toString())
+    }
+
+    debug(`received claim for ${addedMoney.toString()} drops on channel ${this._incomingChannel}`)
 
     let valid = false
     try {
@@ -360,28 +376,29 @@ class PluginXrpPaychan extends PluginBtp {
     // TODO: better reconciliation if claims are invalid
     if (!valid) {
       debug(`got invalid claim signature ${claim.signature} for amount
-        ${newAmount.toString()} drops`)
+        ${claimAmount.toString()} drops total`)
       throw new Error('got invalid claim signature ' +
-        claim.signature + ' for amount ' + newAmount.toString() + ' drops')
+        claim.signature + ' for amount ' + claimAmount.toString() +
+        ' drops total')
     }
 
     // validate claim against balance
-    const channelBalance = util.xrpToDrops(this._incomingChannelDetails.amount)
-    if (newAmount.greaterThan(channelBalance)) {
+    const channelAmount = util.xrpToDrops(this._incomingChannelDetails.amount)
+    if (claimAmount.greaterThan(channelAmount)) {
       const message = `got claim for amount higher than channel balance. amount:
-        ${amount} incoming channel balance: ${channelBalance}`
+        ${claimAmount.toString()} incoming channel amount: ${channelAmount}`
       debug(message)
       throw new Error(message)
     }
 
     this._incomingClaim = {
-      amount: newAmount,
+      amount: claimAmount.toString(),
       signature: claim.signature.toUpperCase()
     }
     this._store.set('incoming_claim', JSON.stringify(this._incomingClaim))
 
     if (this._moneyHandler) {
-      await this._moneyHandler(amount)
+      await this._moneyHandler(moneyAdded.toString())
     }
 
     return []

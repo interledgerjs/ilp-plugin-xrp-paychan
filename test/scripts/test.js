@@ -42,8 +42,10 @@ const client = new BtpPlugin({
 })
 
 async function run () {
-  await server.connect()
-  await client.connect()
+  await Promise.all([
+    server.connect(),
+    client.connect()
+  ])
 
   server.registerDataHandler((ilp) => {
     console.log('server got:', IlpPacket.deserializeIlpPacket(ilp))
@@ -65,7 +67,15 @@ async function run () {
 
   await server.sendMoney(10)
   await client.sendMoney(10)
-  console.log('sent money (no-op)')
+
+  console.log('sent money')
+  console.log('testing reconciliation')
+
+  server._incomingClaim = { amount: '0' } // simulate out of sync behavior
+  await client.sendMoney(10) // this call should warn about discrepency
+  await client.sendMoney(10) // this call should not
+
+  console.log('done; disconnecting')
 
   await client.disconnect()
   await server.disconnect()
