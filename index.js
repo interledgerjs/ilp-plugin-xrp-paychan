@@ -398,7 +398,7 @@ class PluginXrpPaychan extends PluginBtp {
     this._store.set('incoming_claim', JSON.stringify(this._incomingClaim))
 
     if (this._moneyHandler) {
-      await this._moneyHandler(moneyAdded.toString())
+      await this._moneyHandler(addedMoney.toString())
     }
 
     return []
