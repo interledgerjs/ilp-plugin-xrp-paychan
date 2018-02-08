@@ -346,7 +346,7 @@ class PluginXrpPaychan extends PluginBtp {
     const encodedClaim = util.encodeClaim(claim.amount, this._incomingChannel)
     const addedMoney = claimAmount.minus(this._incomingClaim.amount)
 
-    if (addedMoney <= 0) {
+    if (addedMoney.lte(0)) {
       throw new Error('new claim is less than old claim. new=' + claim.amount +
         ' old=' + this._incomingClaim.amount)
     }
@@ -355,7 +355,7 @@ class PluginXrpPaychan extends PluginBtp {
     // This can happen during high throughput when transfers may get out of sync with
     // settlements. So long as one peer doesn't crash before balances are written, the
     // discrepency should go away automatically.
-    if (!addedMoney.equals(amount)) {
+    if (!addedMoney.isEqualTo(amount)) {
       debug('warning: peer balance is out of sync with ours. peer thinks they sent ' +
         amount + '; we got ' + addedMoney.toString())
     }
