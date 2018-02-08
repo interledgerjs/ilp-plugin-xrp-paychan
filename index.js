@@ -153,7 +153,7 @@ class PluginXrpPaychan extends PluginBtp {
 
     this._lastClaimedAmount = new BigNumber(util.xrpToDrops(this._incomingChannelDetails.balance))
     this._claimIntervalId = setInterval(async () => {
-      if (this._lastClaimedAmount.lessThan(this._incomingClaim.amount)) {
+      if (this._lastClaimedAmount.isLessThan(this._incomingClaim.amount)) {
         debug('starting automatic claim. amount=' + this._incomingClaim.amount)
         this._lastClaimedAmount = new BigNumber(this._incomingClaim.amount)
         await this._claimFunds()
@@ -294,14 +294,14 @@ class PluginXrpPaychan extends PluginBtp {
   }
 
   async sendMoney (amount) {
-    const claimAmount = new BigNumber(this._outgoingClaim.amount).add(amount)
+    const claimAmount = new BigNumber(this._outgoingClaim.amount).plus(amount)
     const encodedClaim = util.encodeClaim(claimAmount, this._outgoingChannel)
     const signature = nacl.sign.detached(encodedClaim, this._keyPair.secretKey)
 
     debug(`signed outgoing claim for ${claimAmount.toString()} drops on
       channel ${this._outgoingChannel}`)
 
-    if (claimAmount.greaterThan(new BigNumber(util.xrpToDrops(this._outgoingChannelDetails.amount)).times(this._fundThreshold))) {
+    if (claimAmount.isGreaterThan(new BigNumber(util.xrpToDrops(this._outgoingChannelDetails.amount)).times(this._fundThreshold))) {
       util.fundChannel({
         api: this._api,
         channel: this._outgoingChannel,
@@ -384,7 +384,7 @@ class PluginXrpPaychan extends PluginBtp {
 
     // validate claim against balance
     const channelAmount = util.xrpToDrops(this._incomingChannelDetails.amount)
-    if (claimAmount.greaterThan(channelAmount)) {
+    if (claimAmount.isGreaterThan(channelAmount)) {
       const message = `got claim for amount higher than channel balance. amount:
         ${claimAmount.toString()} incoming channel amount: ${channelAmount}`
       debug(message)

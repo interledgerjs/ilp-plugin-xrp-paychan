@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "bignum": "^0.12.5",
+    "bignumber.js": "^6.0.0",
     "btp-packet": "^1.2.0",
     "ilp-plugin-btp": "^1.1.8",
     "ilp-plugin-xrp-paychan-shared": "github:sharafian/ilp-plugin-xrp-paychan-shared",
