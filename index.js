@@ -301,7 +301,8 @@ class PluginXrpPaychan extends PluginBtp {
     debug(`signed outgoing claim for ${claimAmount.toString()} drops on
       channel ${this._outgoingChannel}`)
 
-    if (claimAmount.isGreaterThan(new BigNumber(util.xrpToDrops(this._outgoingChannelDetails.amount)).times(this._fundThreshold))) {
+    if (!this._funding && claimAmount.isGreaterThan(new BigNumber(util.xrpToDrops(this._outgoingChannelDetails.amount)).times(this._fundThreshold))) {
+      this._funding = true
       util.fundChannel({
         api: this._api,
         channel: this._outgoingChannel,
@@ -309,7 +310,11 @@ class PluginXrpPaychan extends PluginBtp {
         address: this._address,
         secret: this._secret
       })
+        .then(() => {
+          this._funding = false
+        })
         .catch((e) => {
+          this._funding = false
           debug('error issuing fund tx:', e)
         })
     }
