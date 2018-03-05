@@ -390,8 +390,11 @@ class PluginXrpPaychan extends PluginBtp {
     // validate claim against balance
     const channelAmount = util.xrpToDrops(this._incomingChannelDetails.amount)
     if (claimAmount.isGreaterThan(channelAmount)) {
-      const message = `got claim for amount higher than channel balance. amount:
-        ${claimAmount.toString()} incoming channel amount: ${channelAmount}`
+      const message = 'got claim for amount higher than channel balance. amount: ' +
+        claimAmount.toString() +
+        ' incoming channel amount: ' + 
+        channelAmount
+
       debug(message)
       throw new Error(message)
     }
