@@ -14,7 +14,6 @@ const sinonChai = require('sinon-chai')
 chai.use(sinonChai)
 
 const assert = chai.assert
-const expect = chai.expect
 
 // peer secretn spCWi5W9SmYYsaDin9Zqe64C27i
 
@@ -108,13 +107,16 @@ describe('Plugin XRP Paychan Symmetric', function () {
       this.sinon.stub(this.plugin, '_reloadIncomingChannelDetails').callsFake(() => Promise.resolve())
       this.plugin._outgoingChannel = 'my_channel_id'
 
-      const result = await this.plugin._handleData(null, { requestId: 1, data: {
-        protocolData: [{
-          protocolName: 'ripple_channel_id',
-          contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
-          data: Buffer.from('peer_channel_id')
-        }]
-      }})
+      const result = await this.plugin._handleData(null, {
+        requestId: 1,
+        data: {
+          protocolData: [{
+            protocolName: 'ripple_channel_id',
+            contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+            data: Buffer.from('peer_channel_id')
+          }]
+        }
+      })
 
       assert.equal(this.plugin._incomingChannel, 'peer_channel_id', 'incoming channel should be set')
       assert.deepEqual(result, [{
@@ -130,7 +132,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
       this.plugin._outgoingChannel = 'my_channel_id'
       this.plugin._incomingChannel = 'peer_channel_id'
     })
-  
+
     it('should return if it cannot query the peer for a channel', async function () {
       // simulate the plugin not being able to get incoming channel
       this.plugin._incomingChannel = null
@@ -155,7 +157,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     it('should throw if settleDelay is too soon', async function () {
       this.channel.settleDelay = util.MIN_SETTLE_DELAY - 1
-      const stub = this.sinon.stub(this.plugin._api, 'getPaymentChannel')
+      this.sinon.stub(this.plugin._api, 'getPaymentChannel')
         .resolves(this.channel)
 
       await assert.isRejected(this.plugin._reloadIncomingChannelDetails(),
@@ -164,7 +166,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     it('should throw if cancelAfter is specified', async function () {
       this.channel.cancelAfter = Date.now() + 1000
-      const stub = this.sinon.stub(this.plugin._api, 'getPaymentChannel')
+      this.sinon.stub(this.plugin._api, 'getPaymentChannel')
         .resolves(this.channel)
 
       await assert.isRejected(this.plugin._reloadIncomingChannelDetails(),
@@ -173,7 +175,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     it('should throw if expiration is specified', async function () {
       this.channel.expiration = Date.now() + 1000
-      const stub = this.sinon.stub(this.plugin._api, 'getPaymentChannel')
+      this.sinon.stub(this.plugin._api, 'getPaymentChannel')
         .resolves(this.channel)
 
       await assert.isRejected(this.plugin._reloadIncomingChannelDetails(),
@@ -182,7 +184,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     it('should throw if destination does not match our account', async function () {
       this.channel.destination = this.plugin._peerAddress
-      const stub = this.sinon.stub(this.plugin._api, 'getPaymentChannel')
+      this.sinon.stub(this.plugin._api, 'getPaymentChannel')
         .resolves(this.channel)
 
       await assert.isRejected(this.plugin._reloadIncomingChannelDetails(),
@@ -190,7 +192,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
     })
 
     it('should return if all details are ok', async function () {
-      const stub = this.sinon.stub(this.plugin._api, 'getPaymentChannel')
+      this.sinon.stub(this.plugin._api, 'getPaymentChannel')
         .resolves(this.channel)
 
       await this.plugin._reloadIncomingChannelDetails()
@@ -204,7 +206,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
       // mock out the rippled connection
       this.plugin._api.connection = new EventEmitter()
       this.plugin._api.connection.request = () => Promise.resolve(null)
-      this.sinon.stub(this.plugin._api, 'connect').resolves(null) 
+      this.sinon.stub(this.plugin._api, 'connect').resolves(null)
 
       this.channelId = '945BB98D2F03DFA2AED810F8917B2BC344C0AA182A5DB506C16F84593C24244F'
       this.tagStub = this.sinon.stub(util, 'randomTag').returns(1)
@@ -239,7 +241,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
       assert.isTrue(this.submitStub.called, 'should have submitted tx to ledger')
       assert.isTrue(this.loadStub.called, 'should have loaded outgoing channel')
       assert.isTrue(this.reloadStub.called, 'should have reloaded incoming channel')
-    })    
+    })
   })
 
   describe('_claimFunds', function () {
@@ -324,7 +326,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
     beforeEach(function () {
       this.claimAmount = '100'
       this.claimSignature = 'abcdefg'
-      this.claimData = () => ({ 
+      this.claimData = () => ({
         amount: '100',
         protocolData: [{
           protocolName: 'claim',
@@ -332,8 +334,9 @@ describe('Plugin XRP Paychan Symmetric', function () {
           data: JSON.stringify({
             amount: this.claimAmount,
             signature: this.claimSignature
-          }) 
-      }]})
+          })
+        }]
+      })
 
       this.plugin._incomingChannelDetails = this.channel
       this.plugin._incomingClaim = {
@@ -373,7 +376,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
         return Buffer.from('test_result')
       })
 
-      await this.plugin._handleMoney(null, { requestId: 1, data: this.claimData() }),
+      await this.plugin._handleMoney(null, { requestId: 1, data: this.claimData() })
 
       assert.isTrue(handled, 'handler should have been called')
     })

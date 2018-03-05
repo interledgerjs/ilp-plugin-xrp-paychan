@@ -30,7 +30,7 @@ const server = new BtpPlugin({
   },
   rippledServer: 'wss://s.altnet.rippletest.net:51233',
   peerAddress: 'raYsh5o2YXvuZKj6xYyuHNitUTzT8dWKYE',
-  secret: 'snUNeZeq4QRqefSh7oydUSWZv1uh3', 
+  secret: 'snUNeZeq4QRqefSh7oydUSWZv1uh3',
   _store: new Store()
 })
 const client = new BtpPlugin({

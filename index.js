@@ -5,15 +5,9 @@ const debug = require('debug')('ilp-plugin-xrp-paychan')
 const BtpPacket = require('btp-packet')
 const { RippleAPI } = require('ripple-lib')
 const { deriveAddress, deriveKeypair } = require('ripple-keypairs')
-const addressCodec = require('ripple-address-codec')
 const PluginBtp = require('ilp-plugin-btp')
-const uuid = require('uuid')
 const nacl = require('tweetnacl')
-const crypto = require('crypto')
-const bignum = require('bignum') // required in order to convert to buffer
 const BigNumber = require('bignumber.js')
-const assert = require('assert')
-const moment = require('moment')
 const StoreWrapper = require('./store-wrapper')
 const {
   ChannelWatcher,
@@ -392,7 +386,7 @@ class PluginXrpPaychan extends PluginBtp {
     if (claimAmount.isGreaterThan(channelAmount)) {
       const message = 'got claim for amount higher than channel balance. amount: ' +
         claimAmount.toString() +
-        ' incoming channel amount: ' + 
+        ' incoming channel amount: ' +
         channelAmount
 
       debug(message)
