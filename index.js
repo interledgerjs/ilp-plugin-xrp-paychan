@@ -30,7 +30,6 @@ class PluginXrpPaychan extends PluginBtp {
     this._address = opts.address || deriveAddress(deriveKeypair(this._secret).publicKey)
 
     this._peerAddress = opts.peerAddress // TODO: try to get this over the paychan?
-    this._bandwidth = opts.maxUnsecured || DEFAULT_BANDWIDTH
     this._fundThreshold = opts.fundThreshold || DEFAULT_FUND_THRESHOLD
     this._channelAmount = opts.channelAmount || DEFAULT_CHANNEL_AMOUNT
     this._claimInterval = opts.claimInterval || util.DEFAULT_CLAIM_INTERVAL
