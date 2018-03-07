@@ -1,500 +1,409 @@
 'use strict'
 
 // imports
+const debug = require('debug')('ilp-plugin-xrp-paychan')
+const BtpPacket = require('btp-packet')
 const { RippleAPI } = require('ripple-lib')
-const addressCodec = require('ripple-address-codec')
-const { makePaymentChannelPlugin } = require('ilp-plugin-payment-channel-framework')
-const uuid = require('uuid')
+const { deriveAddress, deriveKeypair } = require('ripple-keypairs')
+const PluginBtp = require('ilp-plugin-btp')
 const nacl = require('tweetnacl')
-const crypto = require('crypto')
-const bignum = require('bignum') // required in order to convert to buffer
 const BigNumber = require('bignumber.js')
-const assert = require('assert')
-const { ChannelWatcher } = require('ilp-plugin-xrp-paychan-shared')
+const StoreWrapper = require('./store-wrapper')
+const {
+  ChannelWatcher,
+  util
+} = require('ilp-plugin-xrp-paychan-shared')
 
 // constants
 const CHANNEL_KEYS = 'ilp-plugin-xrp-paychan-channel-keys'
-const DEFAULT_REFUND_THRESHOLD = 0.9
-const {
-  DEFAULT_WATCHER_INTERVAL,
-  STATE_NO_CHANNEL,
-  STATE_CREATING_CHANNEL,
-  STATE_CHANNEL,
-  POLLING_INTERVAL_OUTGOING_PAYCHAN,
-  MIN_SETTLE_DELAY,
-  xrpToDrops,
-  dropsToXrp,
-  sleep
-} = require('./src/lib/constants')
+const DEFAULT_CHANNEL_AMOUNT = 1000000
+const DEFAULT_FUND_THRESHOLD = 0.9
 
-// utility functions
-const randomTag = () => bignum.fromBuffer(crypto.randomBytes(4), {
-  endian: 'big',
-  size: 4
-}).toNumber()
+class PluginXrpPaychan extends PluginBtp {
+  constructor (opts) {
+    super(opts)
 
-const encodeClaim = (amount, id) => Buffer.concat([
-  Buffer.from('CLM\0'),
-  Buffer.from(id, 'hex'),
-  bignum(amount).toBuffer({
-    endian: 'big',
-    size: 8
-  })
-])
+    this._xrpServer = opts.xrpServer || opts.rippledServer // TODO: deprecate rippledServer
+    this._api = new RippleAPI({ server: this._xrpServer })
+    this._secret = opts.secret
+    this._address = opts.address || deriveAddress(deriveKeypair(this._secret).publicKey)
 
-const computeChannelId = (src, dest, sequence) => {
-  const preimage = Buffer.concat([
-    Buffer.from('\0x', 'ascii'),
-    Buffer.from(addressCodec.decodeAccountID(src)),
-    Buffer.from(addressCodec.decodeAccountID(dest)),
-    bignum(sequence).toBuffer({ endian: 'big', size: 4 })
-  ])
+    this._peerAddress = opts.peerAddress // TODO: try to get this over the paychan?
+    this._fundThreshold = opts.fundThreshold || DEFAULT_FUND_THRESHOLD
+    this._channelAmount = opts.channelAmount || DEFAULT_CHANNEL_AMOUNT
+    this._claimInterval = opts.claimInterval || util.DEFAULT_CLAIM_INTERVAL
+    this._settleDelay = opts.settleDelay || util.MIN_SETTLE_DELAY
 
-  return crypto.createHash('sha512')
-    .update(preimage)
-    .digest()
-    .slice(0, 32) // first half sha512
-    .toString('hex')
-    .toUpperCase()
-}
+    const keyPairSeed = util.hmac(this._secret, CHANNEL_KEYS + this._peerAddress)
+    this._keyPair = nacl.sign.keyPair.fromSeed(keyPairSeed)
 
-const claimFunds = async (ctx) => {
-  const self = ctx.state
+    this._store = new StoreWrapper(opts._store)
+    this._outgoingChannel = null
+    this._incomingChannel = null
+    this._incomingChannelDetails = null
+    this._incomingClaim = null
+    this._outgoingClaim = null
 
-  const bestClaim = await self.incomingClaim.getMax()
-  const signature = bestClaim.data
-  const amount = bestClaim.value
-  const claimedValue = (await self.incomingClaimSubmitted.getMax()).value
-  if (claimedValue === amount) return
-
-  const tx = await self.api.preparePaymentChannelClaim(self.address, {
-    balance: dropsToXrp(amount),
-    channel: self.incomingPaymentChannelId,
-    signature: signature.toUpperCase(),
-    publicKey: self.incomingPaymentChannel.publicKey
-  })
-
-  const signedTx = self.api.sign(tx.txJSON, self.secret)
-  ctx.plugin.debug('submitting claim transaction ', tx)
-  const {resultCode, resultMessage} = await self.api.submit(signedTx.signedTransaction)
-  if (resultCode !== 'tesSUCCESS') {
-    ctx.plugin.debug('Error submitting claim: ', resultMessage)
-    throw new Error('Could not claim funds: ', resultMessage)
+    this._watcher = new ChannelWatcher(60 * 1000, this._api)
+    this._watcher.on('channelClose', () => {
+      debug('channel closing; triggering auto-disconnect')
+      // TODO: should we also close our own channel?
+      this.disconnect()
+    })
   }
 
-  return new Promise((resolve) => {
-    const handleTransaction = async function (ev) {
-      if (ev.transaction.Account !== self.address) return
-      if (ev.transaction.Channel !== self.incomingPaymentChannelId) return
-      if (ev.transaction.Balance !== amount) return
+  async _handleData (from, { requestId, data }) {
+    const { ilp, protocolMap } = this.protocolDataToIlpAndCustom(data)
 
-      if (ev.engine_result === 'tesSUCCESS') {
-        ctx.plugin.debug('successfully submitted claim', signature, 'for amount', amount)
-        await self.incomingClaimSubmitted.setIfMax({value: amount, data: signature})
-      } else {
-        ctx.plugin.debug('claiming funds failed ', ev)
-      }
+    if (protocolMap.ripple_channel_id) {
+      this._incomingChannel = protocolMap.ripple_channel_id
+      await this._reloadIncomingChannelDetails()
 
-      setImmediate(() => self.api.connection
-        .removeListener('transaction', handleTransaction))
-      resolve()
+      return [{
+        protocolName: 'ripple_channel_id',
+        contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+        data: Buffer.from(this._outgoingChannel)
+      }]
     }
-    self.api.connection.on('transaction', handleTransaction)
-  })
-}
 
-async function reloadIncomingChannelDetails (ctx) {
-  const self = ctx.state
-  let chanId = self.incomingPaymentChannelId
-  let incomingChan = null
-  if (!chanId) {
-    ctx.plugin.debug('quering peer for incoming channel id')
+    if (!this._dataHandler) {
+      throw new Error('no request handler registered')
+    }
+
+    const response = await this._dataHandler(ilp)
+    return this.ilpAndCustomToProtocolData({ ilp: response })
+  }
+
+  async _reloadIncomingChannelDetails () {
+    if (!this._incomingChannel) {
+      debug('quering peer for incoming channel id')
+      try {
+        const response = await this._call(null, {
+          type: BtpPacket.TYPE_MESSAGE,
+          requestId: await util._requestId(),
+          data: { protocolData: [{
+            protocolName: 'ripple_channel_id',
+            contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+            data: Buffer.from(this._outgoingChannel)
+          }] }
+        })
+
+        // TODO: should this send raw bytes instead of text in the future
+        debug('got ripple_channel_id response:', response)
+        this._incomingChannel = response
+          .protocolData
+          .filter(p => p.protocolName === 'ripple_channel_id')[0]
+          .data
+          .toString()
+        this._store.set('incoming_channel', this._incomingChannel)
+      } catch (err) { debug(err) }
+
+      if (!this._incomingChannel) {
+        debug('cannot load incoming channel. Peer did not return incoming channel id')
+        return
+      }
+    }
+
+    // look up channel on ledger
+    debug('retrieving details for incoming channel', this._incomingChannel)
     try {
-      chanId = await ctx.rpc.call('ripple_channel_id', self.prefix, [])
-    } catch (err) { ctx.plugin.debug(err) }
-
-    if (!chanId) {
-      ctx.plugin.debug('cannot load incoming channel. Peer did not return incoming channel id')
+      this._incomingChannelDetails = await this._api.getPaymentChannel(this._incomingChannel)
+      debug('incoming channel details are:', this._incomingChannelDetails)
+    } catch (err) {
+      if (err.name === 'RippledError' && err.message === 'entryNotFound') {
+        debug('incoming payment channel does not exist:', this._incomingChannel)
+      } else {
+        debug(err)
+      }
       return
     }
-  }
 
-  // look up channel on ledger
-  ctx.plugin.debug('retrieving details for incoming channel', chanId)
-  try {
-    incomingChan = await self.api.getPaymentChannel(chanId)
-    ctx.plugin.debug('incoming channel details are:', incomingChan)
-  } catch (err) {
-    if (err.name === 'RippledError' && err.message === 'entryNotFound') {
-      ctx.plugin.debug('incoming payment channel does not exist:', chanId)
-    } else {
-      ctx.plugin.debug(err)
-    }
-    return
-  }
-
-  const expectedBalance = (await self.incomingClaimSubmitted.getMax()).value
-  const actualBalance = new BigNumber(incomingChan.balance)
-  if (!actualBalance.equals(expectedBalance)) {
-    ctx.plugin.debug('Expected the balance of the incoming payment channel to be ' + expectedBalance +
-      ', but it was ' + actualBalance.toString())
-    throw new Error('Unexpected balance of incoming payment channel')
-  }
-
-  // Make sure the watcher has enough time to submit the best
-  // claim before the channel closes
-  const settleDelay = incomingChan.settleDelay
-  if (settleDelay < MIN_SETTLE_DELAY) {
-    ctx.plugin.debug(`incoming payment channel has a too low settle delay of ${settleDelay.toString()}` +
-      ` seconds. Minimum settle delay is ${MIN_SETTLE_DELAY} seconds.`)
-    throw new Error('settle delay of incoming payment channel too low')
-  }
-
-  if (incomingChan.cancelAfter) {
-    throw new Error('incoming paychan expires (.cancelAfter is set)')
-  }
-
-  if (incomingChan.expiration) {
-    throw new Error('incoming paychan expires (.expiration is set)')
-  }
-
-  if (incomingChan.destination !== self.address) {
-    ctx.plugin.debug('incoming channel destination is not our address: ' +
-      incomingChan.destination)
-    throw new Error('Channel destination address wrong')
-  }
-
-  self.incomingPaymentChannelId = chanId
-  self.incomingPaymentChannel = incomingChan
-
-  self.watcher.watch(chanId)
-}
-
-async function fund (ctx, fundOpts) {
-  const self = ctx.state
-  ctx.plugin.debug('outgoing channel threshold reached, adding more funds')
-  const xrpAmount = dropsToXrp(self.maxAmount)
-  const tx = await self.api.preparePaymentChannelFund(self.address, Object.assign({
-    amount: xrpAmount,
-    channel: self.outgoingPaymentChannelId
-  }, fundOpts))
-
-  ctx.plugin.debug('submitting channel fund tx', tx)
-  const signedTx = self.api.sign(tx.txJSON, self.secret)
-  const {resultCode, resultMessage} = await self.api.submit(signedTx.signedTransaction)
-  if (resultCode !== 'tesSUCCESS') {
-    ctx.plugin.debug(`Failed to add ${xrpAmount} XRP to channel ${self.channelId}: `, resultMessage)
-  }
-
-  const handleTransaction = async function (ev) {
-    if (ev.transaction.hash !== signedTx.id) return
-
-    if (ev.engine_result === 'tesSUCCESS') {
-      ctx.plugin.debug(`successfully funded channel for ${xrpAmount} XRP`)
-      const { amount } = await self.api.getPaymentChannel(self.outgoingPaymentChannelId)
-      self.maxAmount = xrpToDrops(amount) // TODO: no side-effects
-    } else {
-      ctx.plugin.debug('funding channel failed ', ev)
+    // Make sure the watcher has enough time to submit the best
+    // claim before the channel closes
+    const settleDelay = this._incomingChannelDetails.settleDelay
+    if (settleDelay < util.MIN_SETTLE_DELAY) {
+      debug(`incoming payment channel has a too low settle delay of ${settleDelay.toString()}
+        seconds. Minimum settle delay is ${util.MIN_SETTLE_DELAY} seconds.`)
+      throw new Error('settle delay of incoming payment channel too low')
     }
 
-    setImmediate(() => self.api.connection
-      .removeListener('transaction', handleTransaction))
+    if (this._incomingChannelDetails.cancelAfter) {
+      debug(`channel has cancelAfter set`)
+      throw new Error('cancelAfter must not be set')
+    }
+
+    if (this._incomingChannelDetails.expiration) {
+      debug(`channel has expiration set`)
+      throw new Error('expiration must not be set')
+    }
+
+    if (this._incomingChannelDetails.destination !== this._address) {
+      debug('incoming channel destination is not our address: ' +
+        this._incomingChannelDetails.destination)
+      throw new Error('Channel destination address wrong')
+    }
+
+    this._lastClaimedAmount = new BigNumber(util.xrpToDrops(this._incomingChannelDetails.balance))
+    this._claimIntervalId = setInterval(async () => {
+      if (this._lastClaimedAmount.isLessThan(this._incomingClaim.amount)) {
+        debug('starting automatic claim. amount=' + this._incomingClaim.amount)
+        this._lastClaimedAmount = new BigNumber(this._incomingClaim.amount)
+        await this._claimFunds()
+        debug('claimed funds.')
+      }
+    }, this._claimInterval)
   }
 
-  // TODO: handleTransaction is not called back
-  self.api.connection.on('transaction', handleTransaction)
-}
-
-function validateOpts (opts) {
-  // TODO: validate plugin options
-  // mandatory
-  assert(opts.rippledServer, 'rippledServer is required')
-  assert(opts.address, 'address is required')
-  assert(opts.secret, 'secret is required')
-  assert(opts.peerAddress, 'peerAddress is required')
-  assert(opts.maxAmount, 'maxAmount is required')
-  assert(opts.maxUnsecured, 'maxUnsecured is required')
-
-  // optional
-  if (opts.fundThreshold) {
-    assert(parseFloat(opts.fundThreshold) > 0 && parseFloat(opts.fundThreshold) <= 1)
-  }
-}
-
-function hmac (key, message) {
-  const h = crypto.createHmac('sha256', key)
-  h.update(message)
-  return h.digest()
-}
-
-module.exports = makePaymentChannelPlugin({
-  pluginName: 'xrp-paychan',
-
-  constructor: function (ctx, opts) {
-    validateOpts(opts)
-
-    const self = ctx.state
-    self.rippledServer = opts.rippledServer
-    self.api = new RippleAPI({ server: opts.rippledServer })
-    self.address = opts.address
-    self.secret = opts.secret
-    self.peerAddress = opts.peerAddress
-    self.maxAmount = opts.maxAmount
-    self.maxUnsecured = opts.maxUnsecured
-    self.fundThreshold = opts.fundThreshold || DEFAULT_REFUND_THRESHOLD
-    // self.claimThreshold = opts.claimThreshold // TODO: implement automatic claiming if threshold is reached
-    self.prefix = opts.prefix // TODO: auto-generate prefix?
-    self.authToken = opts.token
-    self.settleDelay = opts.settleDelay || MIN_SETTLE_DELAY
-
-    const keyPairSeed = hmac(self.secret, CHANNEL_KEYS + self.peerAddress)
-    self.keyPair = nacl.sign.keyPair.fromSeed(keyPairSeed)
-    self.outgoingChannel = ctx.backend.getMaxValueTracker('outgoing_channel')
-    self.incomingClaim = ctx.backend.getMaxValueTracker('incoming_claim')
-    self.incomingClaimSubmitted = ctx.backend.getMaxValueTracker('incoming_claim_submitted')
-
-    self.watcher = new ChannelWatcher(DEFAULT_WATCHER_INTERVAL, self.api)
-    self.watcher.on('channelClose', async (id, paychan) => {
-      ctx.plugin.debug('incoming channel closing; triggering disconnect')
-      self.incomingPaymentChannel = paychan
-      try {
-        ctx.plugin.disconnect()
-      } catch (err) {
-        ctx.plugin.debug('Fatal Error: failed to disconnect. ' +
-          'Operating on an incoming channel that is about to close.')
-      }
+  // run after connections are established, but before connect resolves
+  async _connect () {
+    debug('connecting to rippled')
+    await this._api.connect()
+    await this._api.connection.request({
+      command: 'subscribe',
+      accounts: [ this._address, this._peerAddress ]
     })
+    debug('connected to rippled')
 
-    ctx.rpc.addMethod('ripple_channel_id', () => {
-      if (!self.incomingPaymentChannelId) {
-        setTimeout(async () => {
-          try {
-            await reloadIncomingChannelDetails(ctx)
-          } catch (err) {
-            ctx.plugin.debug('error loading incoming channel', err)
-          }
-        }, 100)
-      }
-      return self.outgoingPaymentChannelId || null
-    })
-  },
+    await this._store.load('outgoing_channel')
+    await this._store.load('incoming_claim')
+    await this._store.load('outgoing_claim')
 
-  getAuthToken: (ctx) => (ctx.state.authToken),
+    this._outgoingChannel = this._store.get('outgoing_channel')
+    this._incomingClaim = JSON.parse(this._store.get('incoming_claim') || '{"amount":"0"}')
+    this._outgoingClaim = JSON.parse(this._store.get('outgoing_claim') || '{"amount":"0"}')
+    debug('loaded incoming claim:', this._incomingClaim)
 
-  connect: async function (ctx) {
-    const self = ctx.state
-    ctx.plugin.debug('connecting to rippled server:', self.rippledServer)
-    try {
-      await self.api.connect()
+    if (!this._outgoingChannel) {
+      debug('creating new payment channel')
 
-      await self.api.connection.request({
-        command: 'subscribe',
-        accounts: [ self.address, self.peerAddress ]
+      const txTag = util.randomTag()
+      const tx = await this._api.preparePaymentChannelCreate(this._address, {
+        amount: util.dropsToXrp(this._channelAmount),
+        destination: this._peerAddress,
+        settleDelay: this._settleDelay,
+        publicKey: 'ED' + Buffer.from(this._keyPair.publicKey).toString('hex').toUpperCase(),
+        sourceTag: txTag
       })
-    } catch (err) {
-      ctx.plugin.debug('error connecting to rippled server', err)
-      throw new Error('Error connecting to rippled server: ' + err.message)
-    }
-    ctx.plugin.debug('connected to rippled server')
 
-    // open payment channel
-    let channelId
-    const highest = await self.outgoingChannel.getMax()
-    if (highest.value === STATE_CHANNEL) { // channel exists
-      channelId = highest.data
-      ctx.plugin.debug('using existing payment channel:', channelId)
-    } else { // create channel
-      const pluginId = uuid()
-      const tryToCreate = { value: STATE_CREATING_CHANNEL, data: pluginId }
-      const result = await self.outgoingChannel.setIfMax(tryToCreate)
+      debug('created paymentChannelCreate tx', tx.txJSON)
 
-      // if the payment channel has not been created and this process must create it
-      if (result.value === STATE_NO_CHANNEL) {
-        ctx.plugin.debug('creating new payment channel')
-        const txTag = randomTag()
-        let tx
-        try {
-          tx = await self.api.preparePaymentChannelCreate(self.address, {
-            amount: dropsToXrp(self.maxAmount),
-            destination: self.peerAddress,
-            settleDelay: self.settleDelay,
-            publicKey: 'ED' + Buffer.from(self.keyPair.publicKey).toString('hex').toUpperCase(),
-            sourceTag: txTag
-          })
-        } catch (e) {
-          ctx.plugin.debug('Error preparing payment channel.', e)
-          throw e
-        }
-
-        ctx.plugin.debug('created paymentChannelCreate tx', tx.txJSON)
-
-        const signedTx = self.api.sign(tx.txJSON, self.secret)
-        let resultCode
-        let resultMessage
-        try {
-          const result = await self.api.submit(signedTx.signedTransaction)
-          resultCode = result.resultCode
-          resultMessage = result.resultMessage
-        } catch (err) {
-          ctx.plugin.debug('error submitting paymentChannelCreate', err)
-          throw err
-        }
-        if (resultCode !== 'tesSUCCESS') {
-          const message = 'Error creating the payment channel: ' + resultCode + ' ' + resultMessage
-          ctx.plugin.debug(message)
-          throw new Error(message)
-        }
-
-        ctx.plugin.debug('submitted paymentChannelCreate, waiting for tx to be validated (this may take a few seconds)')
-        await new Promise((resolve) => {
-          function handleTransaction (ev) {
-            if (ev.transaction.SourceTag !== txTag) return
-            if (ev.transaction.Account !== self.address) return
-
-            channelId = computeChannelId(
-              ev.transaction.Account,
-              ev.transaction.Destination,
-              ev.transaction.Sequence)
-
-            setImmediate(() => self.api.connection
-              .removeListener('transaction', handleTransaction))
-            resolve()
-          }
-
-          self.api.connection.on('transaction', handleTransaction)
-        })
-        ctx.plugin.debug('payment channel successfully created: ', channelId)
-
-        await self.outgoingChannel.setIfMax({ value: STATE_CHANNEL, data: channelId })
-      } else if (result.value === STATE_CREATING_CHANNEL) {
-      // if another process is currently creating the channel poll for channelId
-        ctx.plugin.debug(`polling for channelId (plugin id ${pluginId})`)
-        while ((await self.outgoingChannel.getMax()).value !== STATE_CHANNEL) {
-          await sleep(POLLING_INTERVAL_OUTGOING_PAYCHAN)
-        }
-        channelId = (await self.outgoingChannel.getMax()).data
+      const signedTx = this._api.sign(tx.txJSON, this._secret)
+      let resultCode
+      let resultMessage
+      try {
+        const result = await this._api.submit(signedTx.signedTransaction)
+        resultCode = result.resultCode
+        resultMessage = result.resultMessage
+      } catch (err) {
+        debug('error submitting paymentChannelCreate', err)
+        throw err
       }
+      if (resultCode !== 'tesSUCCESS') {
+        const message = 'Error creating the payment channel: ' + resultCode + ' ' + resultMessage
+        debug(message)
+        throw new Error(message)
+      }
+
+      debug('submitted paymentChannelCreate, waiting for tx to be validated (this may take a few seconds)')
+      await new Promise((resolve) => {
+        const handleTransaction = (ev) => {
+          if (ev.transaction.SourceTag !== txTag) return
+          if (ev.transaction.Account !== this._address) return
+
+          this._outgoingChannel = util.computeChannelId(
+            ev.transaction.Account,
+            ev.transaction.Destination,
+            ev.transaction.Sequence)
+          this._store.set('outgoing_channel', this._outgoingChannel)
+
+          setImmediate(() => this._api.connection
+            .removeListener('transaction', handleTransaction))
+          resolve()
+        }
+
+        this._api.connection.on('transaction', handleTransaction)
+      })
+      debug('payment channel successfully created: ', this._outgoingChannel)
     }
 
-    self.outgoingPaymentChannelId = channelId
-    self.outgoingPaymentChannel = await self.api.getPaymentChannel(channelId)
+    this._outgoingChannelDetails = await this._api.getPaymentChannel(this._outgoingChannel)
+    await this._reloadIncomingChannelDetails()
+  }
 
-    await reloadIncomingChannelDetails(ctx)
-  },
+  async _claimFunds () {
+    if (!this._incomingClaim.signature) {
+      return
+    }
 
-  disconnect: async function (ctx) {
-    const self = ctx.state
-    ctx.plugin.debug('disconnecting payment channel')
+    const tx = await this._api.preparePaymentChannelClaim(this._address, {
+      balance: util.dropsToXrp(this._incomingClaim.amount),
+      channel: this._incomingChannel,
+      signature: this._incomingClaim.signature.toUpperCase(),
+      publicKey: this._incomingChannelDetails.publicKey
+    })
+
+    const signedTx = this._api.sign(tx.txJSON, this._secret)
+    debug('submitting claim transaction ', tx)
+    const {resultCode, resultMessage} = await this._api.submit(signedTx.signedTransaction)
+    if (resultCode !== 'tesSUCCESS') {
+      debug('Error submitting claim: ', resultMessage)
+      throw new Error('Could not claim funds: ', resultMessage)
+    }
+
+    return new Promise((resolve) => {
+      const handleTransaction = (ev) => {
+        if (ev.transaction.Account !== this._address) return
+        if (ev.transaction.Channel !== this._incomingChannel) return
+
+        if (ev.engine_result === 'tesSUCCESS') {
+          debug('successfully submitted claim', this._incomingClaim)
+        } else {
+          debug('claiming funds failed ', ev)
+        }
+
+        setImmediate(() => this._api.connection
+          .removeListener('transaction', handleTransaction))
+        resolve()
+      }
+      this._api.connection.on('transaction', handleTransaction)
+    })
+  }
+
+  async _disconnect () {
+    debug('disconnecting payment channel')
+    clearInterval(this._claimIntervalId)
     try {
-      await claimFunds(ctx)
-    } catch (err) {
-      ctx.plugin.debug(err)
+      await this._claimFunds()
+    } catch (e) {
+      debug('claim error on disconnect:', e)
     }
 
     try {
-      self.api.disconnect()
-    } catch (err) {
-      ctx.plugin.debug('Error disconnecting from rippled', err)
+      this._api.disconnect()
+    } catch (e) {
+      debug('error disconnecting from rippled:', e)
     }
-  },
+  }
 
-  getAccount: ctx => ctx.plugin._prefix + ctx.state.address,
-  getPeerAccount: ctx => ctx.plugin._prefix + ctx.state.peerAddress,
-  getInfo: ctx => ({
-    currencyCode: 'XRP',
-    currencyScale: 6,
-    prefix: ctx.plugin._prefix,
-    connectors: [ ctx.plugin._prefix + ctx.state.peerAddress ]
-  }),
+  async sendMoney (amount) {
+    const claimAmount = new BigNumber(this._outgoingClaim.amount).plus(amount)
+    const encodedClaim = util.encodeClaim(claimAmount, this._outgoingChannel)
+    const signature = nacl.sign.detached(encodedClaim, this._keyPair.secretKey)
 
-  handleIncomingPrepare: async function (ctx, transfer) {
-    const self = ctx.state
+    debug(`signed outgoing claim for ${claimAmount.toString()} drops on
+      channel ${this._outgoingChannel}`)
 
-    if (!self.incomingPaymentChannel) {
-      throw new Error('incoming payment channel must be established ' +
-        'before incoming transfers are processed')
-    }
-
-    if (self.incomingPaymentChannel.expiration) {
-      throw new Error('cannot process transfer for a payment channel that is closing')
-    }
-
-    // TODO:
-    // 1) check that the transfer does not exceed the incoming chan amount
-
-    // check that the unsecured amount does not exceed the limit
-    const incoming = await ctx.transferLog.getIncomingFulfilledAndPrepared()
-    const amountSecured = await self.incomingClaim.getMax()
-    const exceeds = new BigNumber(incoming)
-      .minus(amountSecured.value)
-      .greaterThan(self.maxUnsecured)
-
-    if (exceeds) {
-      throw new Error(transfer.id + ' exceeds max unsecured balance of: ', self.maxUnsecured)
-    }
-  },
-
-  createOutgoingClaim: async function (ctx, outgoingBalance) {
-    // generate claim for amount
-    const self = ctx.state
-    const encodedClaim = encodeClaim(outgoingBalance, self.outgoingPaymentChannelId)
-
-    // sign a claim
-    const signature = nacl.sign.detached(encodedClaim, self.keyPair.secretKey)
-
-    ctx.plugin.debug(`signing outgoing claim for ${outgoingBalance} drops on ` +
-      `channel ${self.outgoingPaymentChannelId}`)
-
-    // TODO: issue a fund tx if self.fundPercent is reached and tell peer about fund tx
-    if (outgoingBalance > self.maxAmount * self.fundThreshold) {
-      await fund(ctx)
+    if (!this._funding && claimAmount.isGreaterThan(new BigNumber(util.xrpToDrops(this._outgoingChannelDetails.amount)).times(this._fundThreshold))) {
+      this._funding = true
+      util.fundChannel({
+        api: this._api,
+        channel: this._outgoingChannel,
+        amount: this._channelAmount,
+        address: this._address,
+        secret: this._secret
+      })
+        .then(() => {
+          this._funding = false
+        })
+        .catch((e) => {
+          this._funding = false
+          debug('error issuing fund tx:', e)
+        })
     }
 
-    // return claim+amount
-    return {
-      amount: outgoingBalance,
+    this._outgoingClaim = {
+      amount: claimAmount.toString(),
       signature: Buffer.from(signature).toString('hex')
     }
-  },
+    this._store.set('outgoing_claim', JSON.stringify(this._outgoingClaim))
 
-  handleIncomingClaim: async function (ctx, claim) {
-    // get claim+amount
-    const self = ctx.state
-    if (!self.incomingPaymentChannel) await reloadIncomingChannelDetails(ctx)
-    const { amount, signature } = claim
-    ctx.plugin.debug(`received claim for ${amount} drops on channel ${self.incomingPaymentChannelId}`)
+    await this._call(null, {
+      type: BtpPacket.TYPE_TRANSFER,
+      requestId: await util._requestId(),
+      data: {
+        amount,
+        protocolData: [{
+          protocolName: 'claim',
+          contentType: BtpPacket.MIME_APPLICATION_JSON,
+          data: Buffer.from(JSON.stringify(this._outgoingClaim))
+        }]
+      }
+    })
+  }
 
-    const encodedClaim = encodeClaim(amount, self.incomingPaymentChannelId)
+  async _handleMoney (from, { requestId, data }) {
+    const amount = data.amount
+    const protocolData = data.protocolData
+    const claim = JSON.parse(protocolData
+      .filter(p => p.protocolName === 'claim')[0]
+      .data
+      .toString())
+
+    const claimAmount = new BigNumber(claim.amount)
+    const encodedClaim = util.encodeClaim(claim.amount, this._incomingChannel)
+    const addedMoney = claimAmount.minus(this._incomingClaim.amount)
+
+    if (addedMoney.lte(0)) {
+      throw new Error('new claim is less than old claim. new=' + claim.amount +
+        ' old=' + this._incomingClaim.amount)
+    }
+
+    // Don't throw an error here; we'll just emit the addedMoney amount and keep going.
+    // This can happen during high throughput when transfers may get out of sync with
+    // settlements. So long as one peer doesn't crash before balances are written, the
+    // discrepency should go away automatically.
+    if (!addedMoney.isEqualTo(amount)) {
+      debug('warning: peer balance is out of sync with ours. peer thinks they sent ' +
+        amount + '; we got ' + addedMoney.toString())
+    }
+
+    debug(`received claim for ${addedMoney.toString()} drops on channel ${this._incomingChannel}`)
+
     let valid = false
     try {
       valid = nacl.sign.detached.verify(
         encodedClaim,
-        Buffer.from(signature, 'hex'),
-        Buffer.from(self.incomingPaymentChannel.publicKey.substring(2), 'hex')
+        Buffer.from(claim.signature, 'hex'),
+        Buffer.from(this._incomingChannelDetails.publicKey.substring(2), 'hex')
       )
     } catch (err) {
-      ctx.plugin.debug('verifying signature failed:', err.message)
+      debug('verifying signature failed:', err.message)
     }
+
     // TODO: better reconciliation if claims are invalid
     if (!valid) {
-      ctx.plugin.debug(`got invalid claim signature ${signature} for amount ${amount} drops`)
+      debug(`got invalid claim signature ${claim.signature} for amount
+        ${claimAmount.toString()} drops total`)
       throw new Error('got invalid claim signature ' +
-        signature + ' for amount ' + amount + ' drops')
+        claim.signature + ' for amount ' + claimAmount.toString() +
+        ' drops total')
     }
 
     // validate claim against balance
-    const channelBalance = xrpToDrops(self.incomingPaymentChannel.amount)
-    if (new BigNumber(amount).gt(channelBalance)) {
-      const message = 'got claim for amount higher than channel balance. amount: ' + amount + ', incoming channel balance: ' + channelBalance
-      ctx.plugin.debug(message)
+    const channelAmount = util.xrpToDrops(this._incomingChannelDetails.amount)
+    if (claimAmount.isGreaterThan(channelAmount)) {
+      const message = 'got claim for amount higher than channel balance. amount: ' +
+        claimAmount.toString() +
+        ' incoming channel amount: ' +
+        channelAmount
+
+      debug(message)
       throw new Error(message)
     }
 
-    // TODO: issue claim tx if self.claimPercent is exceeded
-    // store in max value tracker, throw error if invalid
-    await self.incomingClaim.setIfMax({
-      value: amount,
-      data: signature
-    })
+    this._incomingClaim = {
+      amount: claimAmount.toString(),
+      signature: claim.signature.toUpperCase()
+    }
+    this._store.set('incoming_claim', JSON.stringify(this._incomingClaim))
+
+    if (this._moneyHandler) {
+      await this._moneyHandler(addedMoney.toString())
+    }
+
+    return []
   }
-})
+}
+
+PluginXrpPaychan.version = 2
+module.exports = PluginXrpPaychan

@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "istanbul test -- _mocha",
-    "integration": "istanbul test -- _mocha test/integration",
+    "test": "nyc --reporter=lcov mocha --",
+    "integration": "nyc --reporter=lcov mocha test/integration --",
     "lint": "eslint ."
   },
   "author": "",
@@ -21,21 +21,21 @@
     "eslint-plugin-node": "^5.1.0",
     "eslint-plugin-promise": "^3.5.0",
     "eslint-plugin-standard": "^3.0.1",
-    "istanbul": "^0.4.5",
+    "ilp-packet": "^2.2.0",
     "mocha": "^3.5.3",
     "nock": "^9.0.20",
+    "nyc": "^11.4.1",
     "proxyquire": "^1.8.0",
     "sinon": "^3.3.0",
     "sinon-chai": "^2.13.0"
   },
   "dependencies": {
-    "bignum": "^0.12.5",
-    "btp-packet": "^1.0.0",
-    "ilp-plugin-payment-channel-framework": "^1.3.1",
-    "ilp-plugin-xrp-paychan-shared": "git+https://git@github.com/dappelt/ilp-plugin-xrp-paychan-shared.git",
-    "moment": "^2.19.2",
+    "bignumber.js": "^6.0.0",
+    "btp-packet": "^1.2.0",
+    "ilp-plugin-btp": "^1.1.8",
+    "ilp-plugin-xrp-paychan-shared": "^2.0.0",
+    "ilp-store-memory": "^1.0.0",
     "ripple-lib": "^0.17.7",
-    "tweetnacl": "^1.0.0",
-    "uuid": "^3.1.0"
+    "tweetnacl": "^1.0.0"
   }
 }
