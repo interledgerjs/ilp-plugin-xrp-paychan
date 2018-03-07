@@ -116,9 +116,6 @@ describe('plugin integration', function () {
       }
     }))
 
-    // this.plugin.registerDataHandler(() => {})
-    // this.peerPlugin.registerDataHandler(() => {})
-
     // automatically accept the ledger when api.submit() is called
     const autoAcceptLedger = (api) => {
       const originalSubmit = api.submit
@@ -192,32 +189,6 @@ describe('plugin integration', function () {
         data: Buffer.from('hello world')
       }
 
-      // this.transfer = {
-      //   id: uuid(),
-      //   ledger: this.plugin.getInfo().prefix,
-      //   from: this.plugin.getAccount(),
-      //   to: this.plugin.getPeerAccount(),
-      //   expiresAt: new Date(Date.now() + 10000).toISOString(),
-      //   amount: '5',
-      //   custom: {
-      //     field: 'some stuff'
-      //   },
-      // executionCondition: base64url(crypto
-      //   .createHash('sha256')
-      //   .update(this.fulfillment)
-      //   .digest())
-      // }
-
-      // this.autoFulfill = new Promise((resolve, reject) => {
-      //   this.peerPlugin.on('incoming_prepare', async (transfer) => {
-      //     await this.peerPlugin.fulfillCondition(
-      //       transfer.id,
-      //       base64url(this.fulfillment)
-      //     )
-      //     resolve()
-      //   })
-      // })
-      // 
       this.peerPlugin.registerDataHandler((ilp) => {
         return ilpPacket.serializeIlpFulfill({
           fulfillment: this.fulfillment,
