@@ -16,7 +16,7 @@ const {
 
 // constants
 const CHANNEL_KEYS = 'ilp-plugin-xrp-paychan-channel-keys'
-const DEFAULT_CHANNEL_AMOUNT = 1000000
+const DEFAULT_CHANNEL_AMOUNT_XRP = 1
 const DEFAULT_FUND_THRESHOLD = 0.9
 
 class PluginXrpPaychan extends PluginBtp {
@@ -28,9 +28,11 @@ class PluginXrpPaychan extends PluginBtp {
     this._secret = opts.secret
     this._address = opts.address || deriveAddress(deriveKeypair(this._secret).publicKey)
 
+    this._currencyScale = opts.currencyScale || 6
+
     this._peerAddress = opts.peerAddress // TODO: try to get this over the paychan?
     this._fundThreshold = opts.fundThreshold || DEFAULT_FUND_THRESHOLD
-    this._channelAmount = opts.channelAmount || DEFAULT_CHANNEL_AMOUNT
+    this._channelAmount = opts.channelAmount || this.xrpToBase(DEFAULT_CHANNEL_AMOUNT_XRP)
     this._claimInterval = opts.claimInterval || util.DEFAULT_CLAIM_INTERVAL
     this._settleDelay = opts.settleDelay || util.MIN_SETTLE_DELAY
 
@@ -50,6 +52,18 @@ class PluginXrpPaychan extends PluginBtp {
       // TODO: should we also close our own channel?
       this.disconnect()
     })
+  }
+
+  xrpToBase (amount) {
+    return new BigNumber(amount)
+      .times(Math.pow(10, this._currencyScale))
+      .toString()
+  }
+
+  baseToXrp (amount) {
+    return new BigNumber(amount)
+      .div(Math.pow(10, this._currencyScale))
+      .toFixed(6, BigNumber.ROUND_UP)
   }
 
   async _handleData (from, { requestId, data }) {
@@ -178,7 +192,7 @@ class PluginXrpPaychan extends PluginBtp {
 
       const txTag = util.randomTag()
       const tx = await this._api.preparePaymentChannelCreate(this._address, {
-        amount: util.dropsToXrp(this._channelAmount),
+        amount: this.baseToXrp(this._channelAmount),
         destination: this._peerAddress,
         settleDelay: this._settleDelay,
         publicKey: 'ED' + Buffer.from(this._keyPair.publicKey).toString('hex').toUpperCase(),
@@ -287,18 +301,19 @@ class PluginXrpPaychan extends PluginBtp {
 
   async sendMoney (amount) {
     const claimAmount = new BigNumber(this._outgoingClaim.amount).plus(amount)
-    const encodedClaim = util.encodeClaim(claimAmount, this._outgoingChannel)
+    const dropClaimAmount = util.xrpToDrops(this.baseToXrp(claimAmount))
+    const encodedClaim = util.encodeClaim(dropClaimAmount, this._outgoingChannel)
     const signature = nacl.sign.detached(encodedClaim, this._keyPair.secretKey)
 
-    debug(`signed outgoing claim for ${claimAmount.toString()} drops on
+    debug(`signed outgoing claim for ${dropClaimAmount.toString()} drops on
       channel ${this._outgoingChannel}`)
 
-    if (!this._funding && claimAmount.isGreaterThan(new BigNumber(util.xrpToDrops(this._outgoingChannelDetails.amount)).times(this._fundThreshold))) {
+    if (!this._funding && new BigNumber(dropClaimAmount).isGreaterThan(new BigNumber(util.xrpToDrops(this._outgoingChannelDetails.amount)).times(this._fundThreshold))) {
       this._funding = true
       util.fundChannel({
         api: this._api,
         channel: this._outgoingChannel,
-        amount: this._channelAmount,
+        amount: util.xrpToDrops(this.baseToXrp(this._channelAmount)),
         address: this._address,
         secret: this._secret
       })
@@ -340,7 +355,8 @@ class PluginXrpPaychan extends PluginBtp {
       .toString())
 
     const claimAmount = new BigNumber(claim.amount)
-    const encodedClaim = util.encodeClaim(claim.amount, this._incomingChannel)
+    const dropClaimAmount = util.xrpToDrops(this.baseToXrp(claimAmount))
+    const encodedClaim = util.encodeClaim(dropClaimAmount, this._incomingChannel)
     const addedMoney = claimAmount.minus(this._incomingClaim.amount)
 
     if (addedMoney.lte(0)) {
@@ -373,17 +389,17 @@ class PluginXrpPaychan extends PluginBtp {
     // TODO: better reconciliation if claims are invalid
     if (!valid) {
       debug(`got invalid claim signature ${claim.signature} for amount
-        ${claimAmount.toString()} drops total`)
+        ${dropClaimAmount.toString()} drops total`)
       throw new Error('got invalid claim signature ' +
-        claim.signature + ' for amount ' + claimAmount.toString() +
+        claim.signature + ' for amount ' + dropClaimAmount.toString() +
         ' drops total')
     }
 
     // validate claim against balance
     const channelAmount = util.xrpToDrops(this._incomingChannelDetails.amount)
-    if (claimAmount.isGreaterThan(channelAmount)) {
+    if (new BigNumber(dropClaimAmount).isGreaterThan(channelAmount)) {
       const message = 'got claim for amount higher than channel balance. amount: ' +
-        claimAmount.toString() +
+        dropClaimAmount.toString() +
         ' incoming channel amount: ' +
         channelAmount
 
