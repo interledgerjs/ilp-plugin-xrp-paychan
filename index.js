@@ -79,6 +79,7 @@ class PluginXrpPaychan extends PluginBtp {
       if (!this._incomingChannel) {
         this._incomingChannel = protocolMap.ripple_channel_id
         this._store.set('incoming_channel', this._incomingChannel)
+        await this._watcher.watch(this._incomingChannel)
       }
 
       await this._reloadIncomingChannelDetails()
@@ -136,6 +137,7 @@ class PluginXrpPaychan extends PluginBtp {
           .data
           .toString()
         this._store.set('incoming_channel', this._incomingChannel)
+        await this._watcher.watch(this._incomingChannel)
       } catch (err) { debug(err) }
 
       if (!this._incomingChannel) {
@@ -244,6 +246,10 @@ class PluginXrpPaychan extends PluginBtp {
     this._incomingClaim = JSON.parse(this._store.get('incoming_claim') || '{"amount":"0"}')
     this._outgoingClaim = JSON.parse(this._store.get('outgoing_claim') || '{"amount":"0"}')
     debug('loaded incoming claim:', this._incomingClaim)
+
+    if (this._incomingChannel) {
+      await this._watcher.watch(this._incomingChannel)
+    }
 
     if (!this._outgoingChannel) {
       debug('creating new payment channel')
