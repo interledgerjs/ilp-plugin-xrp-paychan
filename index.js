@@ -80,8 +80,24 @@ class PluginXrpPaychan extends PluginBtp {
       }]
     }
 
+    if (protocolMap.info) {
+      debug('got info request from peer')
+
+      return [{
+        protocolName: 'info',
+        contentType: BtpPacket.MIME_APPLICATION_JSON,
+        data: Buffer.from(JSON.stringify({
+          currencyScale: this._currencyScale
+        }))
+      }]
+    }
+
     if (!this._dataHandler) {
       throw new Error('no request handler registered')
+    }
+
+    if (!ilp) {
+      throw new Error('no ilp protocol on request')
     }
 
     const response = await this._dataHandler(ilp)
@@ -115,6 +131,32 @@ class PluginXrpPaychan extends PluginBtp {
       if (!this._incomingChannel) {
         debug('cannot load incoming channel. Peer did not return incoming channel id')
         return
+      }
+    }
+
+    // now uses the info protocol to make sure scales are matching
+    if (this._currencyScale !== 6) {
+      let infoResponse
+      try {
+        infoResponse = await this._call(null, {
+          type: BtpPacket.TYPE_MESSAGE,
+          requestId: await util._requestId(),
+          data: { protocolData: [{
+            protocolName: 'info',
+            contentType: BtpPacket.MIME_APPLICATION_OCTET_STREAM,
+            data: Buffer.from([ util.INFO_REQUEST_ALL ])
+          }] }
+        })
+      } catch (e) {
+        throw new Error('peer is unable to accomodate our currencyScale;' +
+          ' they are on an out of date version of this plugin. error=' +
+          e.stack)
+      }
+
+      const info = JSON.parse(infoResponse.protocolData[0].data.toString())
+      if (this._currencyScale !== 6 && info.currencyScale !== this._currencyScale) {
+        throw new Error('Fatal! Currency scale mismatch. this=' + this._currencyScale +
+          ' peer=' + (info.currencyScale || 6))
       }
     }
 
