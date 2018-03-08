@@ -28,7 +28,7 @@ class PluginXrpPaychan extends PluginBtp {
     this._secret = opts.secret
     this._address = opts.address || deriveAddress(deriveKeypair(this._secret).publicKey)
 
-    this._currencyScale = opts.currencyScale || 6
+    this._currencyScale = (typeof opts.currencyScale === 'number') ? opts.currencyScale : 6
 
     this._peerAddress = opts.peerAddress // TODO: try to get this over the paychan?
     this._fundThreshold = opts.fundThreshold || DEFAULT_FUND_THRESHOLD
@@ -135,26 +135,30 @@ class PluginXrpPaychan extends PluginBtp {
     }
 
     // now uses the info protocol to make sure scales are matching
-    if (this._currencyScale !== 6) {
-      let infoResponse
-      try {
-        infoResponse = await this._call(null, {
-          type: BtpPacket.TYPE_MESSAGE,
-          requestId: await util._requestId(),
-          data: { protocolData: [{
-            protocolName: 'info',
-            contentType: BtpPacket.MIME_APPLICATION_OCTET_STREAM,
-            data: Buffer.from([ util.INFO_REQUEST_ALL ])
-          }] }
-        })
-      } catch (e) {
+    let infoResponse
+    try {
+      infoResponse = await this._call(null, {
+        type: BtpPacket.TYPE_MESSAGE,
+        requestId: await util._requestId(),
+        data: { protocolData: [{
+          protocolName: 'info',
+          contentType: BtpPacket.MIME_APPLICATION_OCTET_STREAM,
+          data: Buffer.from([ util.INFO_REQUEST_ALL ])
+        }] }
+      })
+    } catch (e) {
+      if (this._currencyScale !== 6) {
         throw new Error('peer is unable to accomodate our currencyScale;' +
           ' they are on an out of date version of this plugin. error=' +
           e.stack)
+      } else {
+        debug('peer is on an outdated plugin, but currency scales match')
       }
+    }
 
+    if (infoResponse) {
       const info = JSON.parse(infoResponse.protocolData[0].data.toString())
-      if (this._currencyScale !== 6 && info.currencyScale !== this._currencyScale) {
+      if (info.currencyScale !== this._currencyScale) {
         throw new Error('Fatal! Currency scale mismatch. this=' + this._currencyScale +
           ' peer=' + (info.currencyScale || 6))
       }

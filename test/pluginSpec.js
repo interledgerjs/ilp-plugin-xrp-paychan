@@ -174,6 +174,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
     })
 
     it('should return if getPaymentChannel gives a rippled error', async function () {
+      this.sinon.stub(this.plugin, '_call').rejects(new Error('info protocol is not supported'))
       const stub = this.sinon.stub(this.plugin._api, 'getPaymentChannel')
         .callsFake(() => {
           throw new Error('there was an error!')
@@ -185,6 +186,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     it('should throw if settleDelay is too soon', async function () {
       this.channel.settleDelay = util.MIN_SETTLE_DELAY - 1
+      this.sinon.stub(this.plugin, '_call').rejects(new Error('info protocol is not supported'))
       this.sinon.stub(this.plugin._api, 'getPaymentChannel')
         .resolves(this.channel)
 
@@ -194,6 +196,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     it('should throw if cancelAfter is specified', async function () {
       this.channel.cancelAfter = Date.now() + 1000
+      this.sinon.stub(this.plugin, '_call').rejects(new Error('info protocol is not supported'))
       this.sinon.stub(this.plugin._api, 'getPaymentChannel')
         .resolves(this.channel)
 
@@ -203,6 +206,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     it('should throw if expiration is specified', async function () {
       this.channel.expiration = Date.now() + 1000
+      this.sinon.stub(this.plugin, '_call').rejects(new Error('info protocol is not supported'))
       this.sinon.stub(this.plugin._api, 'getPaymentChannel')
         .resolves(this.channel)
 
@@ -212,6 +216,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     it('should throw if destination does not match our account', async function () {
       this.channel.destination = this.plugin._peerAddress
+      this.sinon.stub(this.plugin, '_call').rejects(new Error('info protocol is not supported'))
       this.sinon.stub(this.plugin._api, 'getPaymentChannel')
         .resolves(this.channel)
 
@@ -220,6 +225,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
     })
 
     it('should return if all details are ok', async function () {
+      this.sinon.stub(this.plugin, '_call').rejects(new Error('info protocol is not supported'))
       this.sinon.stub(this.plugin._api, 'getPaymentChannel')
         .resolves(this.channel)
 
