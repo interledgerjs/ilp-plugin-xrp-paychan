@@ -247,6 +247,14 @@ describe('Plugin XRP Paychan Symmetric', function () {
           /peer is unable to accomodate our currencyScale; they are on an out of date version of this plugin/)
       })
 
+      it('should not throw an error if the peer doesn\'t support info but our scale is 6', async function () {
+        this.plugin._currencyScale = 6
+        this.sinon.stub(this.plugin, '_call')
+          .rejects(new Error('no ilp protocol on request'))
+
+        await this.plugin._reloadIncomingChannelDetails()
+      })
+
       it('should throw an error if the peer scale does not match ours', async function () {
         this.sinon.stub(this.plugin, '_call')
           .resolves({ protocolData: [{
