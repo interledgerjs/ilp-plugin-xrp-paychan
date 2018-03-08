@@ -78,7 +78,11 @@ class PluginXrpPaychan extends PluginBtp {
     const { ilp, protocolMap } = this.protocolDataToIlpAndCustom(data)
 
     if (protocolMap.ripple_channel_id) {
-      this._incomingChannel = protocolMap.ripple_channel_id
+      if (!this._incomingChannel) {
+        this._incomingChannel = protocolMap.ripple_channel_id
+        this._store.set('incoming_channel', this._incomingChannel)
+      }
+
       await this._reloadIncomingChannelDetails()
 
       return [{
@@ -232,10 +236,12 @@ class PluginXrpPaychan extends PluginBtp {
     })
     debug('connected to rippled')
 
+    await this._store.load('incoming_channel')
     await this._store.load('outgoing_channel')
     await this._store.load('incoming_claim')
     await this._store.load('outgoing_claim')
 
+    this._incomingChannel = this._store.get('incoming_channel')
     this._outgoingChannel = this._store.get('outgoing_channel')
     this._incomingClaim = JSON.parse(this._store.get('incoming_claim') || '{"amount":"0"}')
     this._outgoingClaim = JSON.parse(this._store.get('outgoing_claim') || '{"amount":"0"}')
