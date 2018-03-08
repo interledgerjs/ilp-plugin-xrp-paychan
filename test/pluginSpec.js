@@ -28,7 +28,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
       _store: new Store()
     })
 
-    this.sinon.stub(util, 'encodeClaim').returns('abcdefg')
+    this.encodeStub = this.sinon.stub(util, 'encodeClaim').returns('abcdefg')
     this.sinon.stub(nacl.sign, 'detached').returns('abcdefg')
 
     this.ilpData = {
@@ -311,6 +311,34 @@ describe('Plugin XRP Paychan Symmetric', function () {
       }
     })
 
+    describe('with high scale', function () {
+      beforeEach(function () {
+        this.plugin._currencyScale = 9
+        this.plugin._outgoingClaim = {
+          amount: '990',
+          signature: '61626364656667'
+        }
+      })
+
+      it('should round high-scale amount up to next drop', async function () {
+        this.sinon.stub(this.plugin, '_call').resolves(null)
+
+        await this.plugin.sendMoney(100)
+
+        assert.deepEqual(this.encodeStub.getCall(0).args, [ '2', 'my_channel_id' ])
+      })
+
+      it('should keep error under a drop even on repeated roundings', async function () {
+        this.sinon.stub(this.plugin, '_call').resolves(null)
+
+        await this.plugin.sendMoney(100)
+        await this.plugin.sendMoney(100)
+
+        assert.deepEqual(this.encodeStub.getCall(0).args, [ '2', 'my_channel_id' ])
+        assert.deepEqual(this.encodeStub.getCall(1).args, [ '2', 'my_channel_id' ])
+      })
+    })
+
     it('should sign a claim and submit it to the other side', async function () {
       this.sinon.stub(this.plugin, '_call').callsFake((from, data) => {
         // forgive me
@@ -379,6 +407,23 @@ describe('Plugin XRP Paychan Symmetric', function () {
       await this.plugin._handleMoney(null, { requestId: 1, data: this.claimData() })
 
       assert.isTrue(handled, 'handler should have been called')
+    })
+
+    it('should handle a claim with high scale', async function () {
+      this.claimAmount = 1160
+      this.plugin._incomingClaim = {
+        amount: '990',
+        signature: 'some signature'
+      }
+
+      this.plugin._incomingChannel = 'abcdef'
+      this.plugin._currencyScale = 9
+      await this.plugin._handleMoney(null, {
+        requestId: 1,
+        data: this.claimData()
+      })
+
+      assert.deepEqual(this.encodeStub.getCall(0).args, [ '2', 'abcdef' ])
     })
   })
 })
