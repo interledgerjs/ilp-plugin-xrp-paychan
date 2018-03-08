@@ -102,6 +102,34 @@ describe('Plugin XRP Paychan Symmetric', function () {
       }), /no request handler registered/)
     })
 
+    it('should throw an error if there is no ilp data', async function () {
+      this.plugin.registerDataHandler(() => {})
+
+      await assert.isRejected(this.plugin._handleData(null, {
+        requestId: 1,
+        data: { protocolData: [] }
+      }), /no ilp protocol on request/)
+    })
+
+    it('should handle info request', async function () {
+      const result = await this.plugin._handleData(null, {
+        requestId: 1,
+        data: {
+          protocolData: [{
+            protocolName: 'info',
+            contentType: BtpPacket.MIME_APPLICATION_OCTET_STREAM,
+            data: Buffer.from([ util.INFO_REQUEST_ALL ])
+          }]
+        }
+      })
+
+      assert.deepEqual(result, [{
+        protocolName: 'info',
+        contentType: BtpPacket.MIME_APPLICATION_JSON,
+        data: Buffer.from(JSON.stringify({ currencyScale: 6 }))
+      }])
+    })
+
     it('should handle ripple_channel_id protocol', async function () {
       // no need to look at the ledger in this test
       this.sinon.stub(this.plugin, '_reloadIncomingChannelDetails').callsFake(() => Promise.resolve())
@@ -198,6 +226,48 @@ describe('Plugin XRP Paychan Symmetric', function () {
       await this.plugin._reloadIncomingChannelDetails()
       assert.isTrue(!!this.plugin._claimIntervalId,
         'claim interval should be started if reload was successful')
+    })
+
+    describe('with high scale', function () {
+      beforeEach(function () {
+        this.plugin._currencyScale = 9
+      })
+
+      it('should throw an error if the peer doesn\'t support info', async function () {
+        this.sinon.stub(this.plugin, '_call')
+          .rejects(new Error('no ilp protocol on request'))
+
+        assert.isRejected(this.plugin._reloadIncomingChannelDetails(),
+          /peer is unable to accomodate our currencyScale; they are on an out of date version of this plugin/)
+      })
+
+      it('should throw an error if the peer scale does not match ours', async function () {
+        this.sinon.stub(this.plugin, '_call')
+          .resolves({ protocolData: [{
+            protocolName: 'info',
+            contentType: BtpPacket.MIME_APPLICATION_JSON,
+            data: Buffer.from(JSON.stringify({ currencyScale: 8 }))
+          }]})
+
+        assert.isRejected(this.plugin._reloadIncomingChannelDetails(),
+          /Fatal! Currency scale mismatch./)
+      })
+
+      it('should succeed if scales match', async function () {
+        this.sinon.stub(this.plugin, '_call')
+          .resolves({ protocolData: [{
+            protocolName: 'info',
+            contentType: BtpPacket.MIME_APPLICATION_JSON,
+            data: Buffer.from(JSON.stringify({ currencyScale: 9 }))
+          }]})
+
+        this.sinon.stub(this.plugin._api, 'getPaymentChannel')
+          .resolves(this.channel)
+
+        await this.plugin._reloadIncomingChannelDetails()
+        assert.isTrue(!!this.plugin._claimIntervalId,
+          'claim interval should be started if reload was successful')
+      })
     })
   })
 
