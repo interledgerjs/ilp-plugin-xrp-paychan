@@ -77,9 +77,15 @@ class PluginXrpPaychan extends PluginBtp {
 
     if (protocolMap.ripple_channel_id) {
       if (!this._incomingChannel) {
-        this._incomingChannel = protocolMap.ripple_channel_id
-        this._store.set('incoming_channel', this._incomingChannel)
-        await this._watcher.watch(this._incomingChannel)
+        const details = await this._api.getPaymentChannel(protocolMap.ripple_channel_id)
+
+        // second check occurs to prevent race condition where two lookups happen at once
+        if (!this._incomingChannel) {
+          this._validateChannelDetails(details)
+          this._incomingChannel = protocolMap.ripple_channel_id
+          this._store.set('incoming_channel', this._incomingChannel)
+          await this._watcher.watch(this._incomingChannel)
+        }
       }
 
       await this._reloadIncomingChannelDetails()
@@ -190,30 +196,7 @@ class PluginXrpPaychan extends PluginBtp {
       return
     }
 
-    // Make sure the watcher has enough time to submit the best
-    // claim before the channel closes
-    const settleDelay = this._incomingChannelDetails.settleDelay
-    if (settleDelay < util.MIN_SETTLE_DELAY) {
-      debug(`incoming payment channel has a too low settle delay of ${settleDelay.toString()}
-        seconds. Minimum settle delay is ${util.MIN_SETTLE_DELAY} seconds.`)
-      throw new Error('settle delay of incoming payment channel too low')
-    }
-
-    if (this._incomingChannelDetails.cancelAfter) {
-      debug(`channel has cancelAfter set`)
-      throw new Error('cancelAfter must not be set')
-    }
-
-    if (this._incomingChannelDetails.expiration) {
-      debug(`channel has expiration set`)
-      throw new Error('expiration must not be set')
-    }
-
-    if (this._incomingChannelDetails.destination !== this._address) {
-      debug('incoming channel destination is not our address: ' +
-        this._incomingChannelDetails.destination)
-      throw new Error('Channel destination address wrong')
-    }
+    this._validateChannelDetails(this._incomingChannelDetails)
 
     this._lastClaimedAmount = new BigNumber(util.xrpToDrops(this._incomingChannelDetails.balance))
     this._claimIntervalId = setInterval(async () => {
@@ -224,6 +207,33 @@ class PluginXrpPaychan extends PluginBtp {
         debug('claimed funds.')
       }
     }, this._claimInterval)
+  }
+
+  _validateChannelDetails (details) {
+    // Make sure the watcher has enough time to submit the best
+    // claim before the channel closes
+    const settleDelay = details.settleDelay
+    if (settleDelay < util.MIN_SETTLE_DELAY) {
+      debug(`incoming payment channel has a too low settle delay of ${settleDelay.toString()}
+        seconds. Minimum settle delay is ${util.MIN_SETTLE_DELAY} seconds.`)
+      throw new Error('settle delay of incoming payment channel too low')
+    }
+
+    if (details.cancelAfter) {
+      debug(`channel has cancelAfter set`)
+      throw new Error('cancelAfter must not be set')
+    }
+
+    if (details.expiration) {
+      debug(`channel has expiration set`)
+      throw new Error('expiration must not be set')
+    }
+
+    if (details.destination !== this._address) {
+      debug('incoming channel destination is not our address: ' +
+        details.destination)
+      throw new Error('Channel destination address wrong')
+    }
   }
 
   // run after connections are established, but before connect resolves
