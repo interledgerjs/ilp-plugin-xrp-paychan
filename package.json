@@ -37,5 +37,9 @@
     "ilp-store-memory": "^1.0.0",
     "ripple-lib": "^0.17.7",
     "tweetnacl": "^1.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:ripple/ilp-plugin-xrp-paychan.git"
   }
 }
