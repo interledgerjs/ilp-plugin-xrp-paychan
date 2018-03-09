@@ -143,11 +143,12 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     it('should handle ripple_channel_id protocol', async function () {
       // no need to look at the ledger in this test
+      this.getPaymentChannelStub = this.sinon.stub(this.plugin._api, 'getPaymentChannel').resolves(this.channel)
       this.sinon.stub(this.plugin, '_reloadIncomingChannelDetails').callsFake(() => Promise.resolve())
-      const watchStub = this.sinon.stub(this.plugin._watcher, 'watch').callsFake(() => Promise.resolve())
+      this.sinon.stub(this.plugin._watcher, 'watch').callsFake(() => Promise.resolve())
       this.plugin._outgoingChannel = 'my_channel_id'
 
-      const result = await this.plugin._handleData(null, {
+      await this.plugin._handleData(null, {
         requestId: 1,
         data: {
           protocolData: [{
@@ -157,36 +158,70 @@ describe('Plugin XRP Paychan Symmetric', function () {
           }]
         }
       })
-
-      assert.equal(this.plugin._incomingChannel, 'peer_channel_id', 'incoming channel should be set')
-      assert.isTrue(watchStub.called, 'should be watching channel')
-      assert.deepEqual(result, [{
-        protocolName: 'ripple_channel_id',
-        contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
-        data: Buffer.from(this.plugin._outgoingChannel)
-      }], 'result should contain outgoing channel')
     })
 
-    it('should not reset existing channel with ripple_channel_id', async function () {
-      // no need to look at the ledger in this test
-      this.sinon.stub(this.plugin, '_reloadIncomingChannelDetails').callsFake(() => Promise.resolve())
-      const watchStub = this.sinon.stub(this.plugin._watcher, 'watch').callsFake(() => Promise.resolve())
-      this.plugin._incomingChannel = 'peer_channel_id'
-      this.plugin._outgoingChannel = 'my_channel_id'
-
-      await this.plugin._handleData(null, {
-        requestId: 1,
-        data: {
-          protocolData: [{
-            protocolName: 'ripple_channel_id',
-            contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
-            data: Buffer.from('fake_peer_channel_id')
-          }]
+    describe('ripple_channel_id', function () {
+      beforeEach(function () {
+        this.getPaymentChannelStub = this.sinon.stub(this.plugin._api, 'getPaymentChannel').resolves()
+        this.sinon.stub(this.plugin, '_reloadIncomingChannelDetails').callsFake(() => Promise.resolve())
+        this.validateChannelDetailsStub = this.sinon.stub(this.plugin, '_validateChannelDetails').returns()
+        this.channelIdRequest = {
+          requestId: 1,
+          data: {
+            protocolData: [{
+              protocolName: 'ripple_channel_id',
+              contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+              data: Buffer.from('peer_channel_id')
+            }]
+          }
         }
+
+        // no need to look at the ledger in this test
+        this.watchStub = this.sinon.stub(this.plugin._watcher, 'watch').callsFake(() => Promise.resolve())
+        this.plugin._outgoingChannel = 'my_channel_id'
       })
 
-      assert.equal(this.plugin._incomingChannel, 'peer_channel_id', 'incoming channel should be set')
-      assert.isFalse(watchStub.called, 'should not be watching new channel')
+      it('should handle ripple_channel_id protocol', async function () {
+        const result = await this.plugin._handleData(null, this.channelIdRequest)
+
+        assert.equal(this.plugin._incomingChannel, 'peer_channel_id', 'incoming channel should be set')
+        assert.isTrue(this.watchStub.called, 'should be watching channel')
+        assert.deepEqual(result, [{
+          protocolName: 'ripple_channel_id',
+          contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+          data: Buffer.from(this.plugin._outgoingChannel)
+        }], 'result should contain outgoing channel')
+      })
+
+      it('should throw on invalid channel details', async function () {
+        // no need to look at the ledger in this test
+        this.validateChannelDetailsStub.throws()
+
+        await assert.isRejected(this.plugin._handleData(null, this.channelIdRequest), /Error/)
+        assert.equal(this.plugin._incomingChannel, null, 'incoming channel should not be set')
+      })
+
+      it('should not race two requests', async function () {
+        await Promise.all([
+          this.plugin._handleData(null, this.channelIdRequest),
+          this.plugin._handleData(null, this.channelIdRequest)
+        ])
+
+        assert.equal(this.validateChannelDetailsStub.callCount, 1,
+          'validate channel details should only be called once, otherwise there was a race')
+      })
+
+      it('should not reset existing channel with ripple_channel_id', async function () {
+        // no need to look at the ledger in this test
+        this.plugin._incomingChannel = 'peer_channel_id'
+        this.plugin._outgoingChannel = 'my_channel_id'
+
+        this.channelIdRequest.data.protocolData[0].data = Buffer.from('fake_peer_channel_id')
+        await this.plugin._handleData(null, this.channelIdRequest)
+
+        assert.equal(this.plugin._incomingChannel, 'peer_channel_id', 'incoming channel should be set')
+        assert.isFalse(this.watchStub.called, 'should not be watching new channel')
+      })
     })
   })
 
