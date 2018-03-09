@@ -73,6 +73,30 @@ describe('Plugin XRP Paychan Symmetric', function () {
     this.sinon.restore()
   })
 
+  describe('constructor', function () {
+    beforeEach(function () {
+      this.opts = {
+        xrpServer: 'wss://s.altnet.rippletest.net:51233',
+        secret: 'sahNtietWCRzmX7Z2Zy7Z3EsvFDjv',
+        address: 'ra3h9tzcipHTZCdQesMthfx4iBZNEEuHXG',
+        peerAddress: 'rKwCnwtM6et7BVaCZm97hbU8oXkoohReea',
+        _store: new Store()
+      }
+    })
+
+    it('should throw an error on non-number currencyScale', function () {
+      this.opts.currencyScale = 'foo'
+      assert.throws(() => new Plugin(this.opts),
+        /opts.currencyScale must be a number if specified/)
+    })
+
+    it('should not throw an error on number currencyScale', function () {
+      this.opts.currencyScale = 6
+      const plugin = new Plugin(this.opts)
+      assert.isOk(plugin)
+    })
+  })
+
   describe('_handleData', function () {
     it('should handle ilp data', async function () {
       let handled = false
