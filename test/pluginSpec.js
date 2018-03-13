@@ -419,6 +419,24 @@ describe('Plugin XRP Paychan Symmetric', function () {
       }
     })
 
+    describe('with low scale', function () {
+      beforeEach(function () {
+        this.plugin._currencyScale = 2
+        this.plugin._outgoingClaim = {
+          amount: '9',
+          signature: '61626364656667'
+        }
+      })
+
+      it('should multiply base to get drops', async function () {
+        this.sinon.stub(this.plugin, '_call').resolves(null)
+
+        await this.plugin.sendMoney(2)
+
+        assert.deepEqual(this.encodeStub.getCall(0).args, [ '110000', 'my_channel_id' ])
+      })
+    })
+
     describe('with high scale', function () {
       beforeEach(function () {
         this.plugin._currencyScale = 9
