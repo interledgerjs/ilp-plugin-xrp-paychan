@@ -36,7 +36,7 @@
   "dependencies": {
     "bignumber.js": "^6.0.0",
     "btp-packet": "^1.2.0",
-    "ilp-plugin-btp": "^1.1.8",
+    "ilp-plugin-btp": "^1.1.9",
     "ilp-plugin-xrp-paychan-shared": "^2.0.0",
     "ilp-store-memory": "^1.0.0",
     "ripple-lib": "^0.19.0",

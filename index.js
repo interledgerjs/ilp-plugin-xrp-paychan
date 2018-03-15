@@ -84,7 +84,7 @@ class PluginXrpPaychan extends PluginBtp {
       return [{
         protocolName: 'ripple_channel_id',
         contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
-        data: Buffer.from(this._outgoingChannel)
+        data: Buffer.from(this._outgoingChannel || '')
       }]
     }
 
@@ -259,34 +259,6 @@ class PluginXrpPaychan extends PluginBtp {
         throw err
       }
 
-      // const tx = await this._api.preparePaymentChannelCreate(this._address, {
-      //   amount: util.dropsToXrp(this._channelAmount),
-      //   destination: this._peerAddress,
-      //   settleDelay: this._settleDelay,
-      //   publicKey: 'ED' + Buffer.from(this._keyPair.publicKey).toString('hex').toUpperCase(),
-      //   sourceTag: txTag
-      // })
-
-      // debug('created paymentChannelCreate tx', tx.txJSON)
-
-      // const signedTx = this._api.sign(tx.txJSON, this._secret)
-      // let resultCode
-      // let resultMessage
-      // try {
-      //   const result = await this._api.submit(signedTx.signedTransaction)
-      //   resultCode = result.resultCode
-      //   resultMessage = result.resultMessage
-      // } catch (err) {
-      //   debug('error submitting paymentChannelCreate', err)
-      //   throw err
-      // }
-      // if (resultCode !== 'tesSUCCESS') {
-      //   const message = 'Error creating the payment channel: ' + resultCode + ' ' + resultMessage
-      //   debug(message)
-      //   throw new Error(message)
-      // }
-      //
-
       this._outgoingChannel = util.computeChannelId(
         ev.transaction.Account,
         ev.transaction.Destination,
@@ -294,20 +266,6 @@ class PluginXrpPaychan extends PluginBtp {
       )
       this._store.set('outgoing_channel', this._outgoingChannel)
 
-      // await new Promise((resolve) => {
-      //   const handleTransaction = (ev) => {
-      //     if (ev.transaction.SourceTag !== txTag) return
-      //     if (ev.transaction.Account !== this._address) return
-
-      //     this._store.set('outgoing_channel', this._outgoingChannel)
-
-      //     setImmediate(() => this._api.connection
-      //       .removeListener('transaction', handleTransaction))
-      //     resolve()
-      //   }
-
-      //   this._api.connection.on('transaction', handleTransaction)
-      // })
       debug('payment channel successfully created: ', this._outgoingChannel)
     }
 
