@@ -6,14 +6,17 @@ chai.use(chaiAsPromised)
 const assert = chai.assert
 const expect = chai.expect
 
-const ilpPacket = require('ilp-packet')
+const chalk = require('chalk')
+const btpPacket = require('btp-packet')
 const crypto = require('crypto')
 const BigNumber = require('bignumber.js')
 const PluginRipple = require('../../index.js')
 const RippleAPI = require('ripple-lib').RippleAPI
 const Store = require('ilp-store-memory')
-const {payTo, ledgerAccept} = require('./utils')
+const { payTo, ledgerAccept, autoAcceptLedger, spawnParallel } = require('./utils')
 const { sleep, dropsToXrp } = require('../../src/lib/constants')
+const { util } = require('ilp-plugin-xrp-paychan-shared')
+const nacl = require('tweetnacl')
 
 const SERVER_URL = 'ws://127.0.0.1:6006'
 const COMMON_OPTS = {
@@ -24,10 +27,6 @@ const COMMON_OPTS = {
   maxUnsecured: '5000',
   channelAmount: 100000,
   fundThreshold: '0.9'
-}
-
-function acceptLedger (api) {
-  return api.connection.request({command: 'ledger_accept'})
 }
 
 function setup (server = 'wss://s1.ripple.com') {
@@ -47,20 +46,16 @@ function setupAccounts (testcase) {
     .then(() => payTo(api, testcase.peer.address))
 }
 
-async function connectPlugins (...plugins) {
-  const promise = Promise.all(plugins.map((p) => p.connect()))
-  await sleep(100) // wait until the plugins have exchanged their channel IDs
-  return promise
+async function exchangePaychanIds (plugin) {
+  await plugin.connect()
+  // wait so that the plugins exchange channel ids.
+  await sleep(500) // TODO: remove sleep once channel id exchange is refactored
+  await plugin._reloadIncomingChannelDetails()
 }
 
 async function teardown () {
-  const disconnectPlugin = async function (plugin) {
-    if (plugin && plugin.isConnected()) {
-      return plugin.disconnect()
-    }
-  }
-  await disconnectPlugin(this.plugin)
-  await disconnectPlugin(this.peerPlugin)
+  this.plugin && this.plugin.isConnected() && await this.plugin.disconnect()
+  this.peerPluginProc && this.peerPluginProc.kill('SIGINT')
   return this.api.disconnect()
 }
 
@@ -85,6 +80,7 @@ function suiteSetup () {
 describe('plugin integration', function () {
   before(suiteSetup)
   beforeEach(async function () {
+    this.timeout(10000)
     await setup.call(this, SERVER_URL)
 
     const sharedSecret = 'secret'
@@ -98,11 +94,12 @@ describe('plugin integration', function () {
       server: `btp+ws://:${sharedSecret}@${serverHost}:${serverPort}`,
       _store: new Store()
     }))
-    this.peerPlugin = new PluginRipple(Object.assign({}, COMMON_OPTS, {
+    autoAcceptLedger(this.plugin._api)
+
+    const peerOpts = Object.assign({}, COMMON_OPTS, {
       address: this.peer.address,
       secret: this.peer.secret,
       peerAddress: this.newWallet.address,
-      _store: new Store(),
       listener: {
         port: serverPort,
         secret: sharedSecret
@@ -114,32 +111,37 @@ describe('plugin integration', function () {
         currencyCode: 'XRP',
         connector: []
       }
-    }))
+    })
+    await new Promise((resolve, reject) => {
+      this.peerPluginProc = spawnParallel('node', ['test/integration/run-peer-plugin'], {
+        env: {
+          opts: JSON.stringify(peerOpts),
+          DEBUG: 'ilp*'
+        }
+      }, function (line, enc, callback) { // formatter
+        this.push('' + chalk.dim('btp-server ') + line.toString('utf-8') + '\n')
+        const strLine = line.toString('utf-8')
+        if (strLine.includes('listening for BTP connections')) resolve()
+        if (strLine.includes('Error connecting peer plugin')) reject(new Error(strLine))
+        callback()
+      })
+    })
 
-    // automatically accept the ledger when api.submit() is called
-    const autoAcceptLedger = (api) => {
-      const originalSubmit = api.submit
-      api.submit = async (...args) => {
-        return originalSubmit.call(api, ...args).then((result) => {
-          setTimeout(acceptLedger.bind(null, this.api), 20)
-          return result
-        })
-      }
-    }
-    autoAcceptLedger(this.plugin._api)
-    autoAcceptLedger(this.peerPlugin._api)
+    const keyPairSeed = util.hmac(this.peer.secret,
+      'ilp-plugin-xrp-paychan-channel-keys' + this.newWallet.address)
+    this.peerKeyPair = nacl.sign.keyPair.fromSeed(keyPairSeed)
   })
   afterEach(teardown)
 
   describe('connect()', function () {
     it('is eventually fulfilled', async function () {
-      const connectPromise = Promise.all([this.peerPlugin.connect(),
-        this.plugin.connect()])
+      await this.plugin.connect()
+      const connectPromise = Promise.all([this.plugin.connect()])
       return expect(connectPromise).to.be.eventually.fulfilled
     })
 
     it('creates an outgoing paychan', async function () {
-      await connectPlugins(this.peerPlugin, this.plugin)
+      await exchangePaychanIds(this.plugin)
 
       const paychanid = this.plugin._outgoingChannel
       const chan = await this.api.getPaymentChannel(paychanid)
@@ -155,7 +157,7 @@ describe('plugin integration', function () {
     })
 
     it('has an incoming paychan', async function () {
-      await connectPlugins(this.peerPlugin, this.plugin)
+      await exchangePaychanIds(this.plugin)
 
       const paychanid = this.plugin._incomingChannel
       const chan = await this.api.getPaymentChannel(paychanid)
@@ -166,15 +168,16 @@ describe('plugin integration', function () {
       assert.strictEqual(chan.destination, this.newWallet.address)
       assert.strictEqual(chan.settleDelay, COMMON_OPTS.settleDelay)
 
-      const expectedPubKey = 'ED' + Buffer.from(this.peerPlugin._keyPair.publicKey)
+      const expectedPubKey = 'ED' + Buffer.from(this.peerKeyPair.publicKey)
         .toString('hex').toUpperCase()
+
       assert.strictEqual(chan.publicKey, expectedPubKey)
     })
   })
 
   describe('channel claims and funding', function () {
     beforeEach(async function () {
-      await connectPlugins(this.peerPlugin, this.plugin)
+      await exchangePaychanIds(this.plugin)
       await this.api.connection.request({
         command: 'subscribe',
         accounts: [ this.newWallet.address, this.peer.address ]
@@ -189,24 +192,31 @@ describe('plugin integration', function () {
         data: Buffer.from('hello world')
       }
 
-      this.peerPlugin.registerDataHandler((ilp) => {
-        return ilpPacket.serializeIlpFulfill({
-          fulfillment: this.fulfillment,
-          data: Buffer.from('hello world again')
-        })
+      this.claimAmount = 10
+      const encodedClaim = util.encodeClaim(this.claimAmount, this.plugin._incomingChannel)
+      const sig = nacl.sign.detached(encodedClaim, this.peerKeyPair.secretKey)
+      this.claimSignature = Buffer.from(sig).toString('hex').toUpperCase()
+      this.claimData = () => ({
+        amount: this.claimAmount,
+        protocolData: [{
+          protocolName: 'claim',
+          contentType: btpPacket.MIME_APPLICATION_JSON,
+          data: JSON.stringify({
+            amount: this.claimAmount,
+            signature: this.claimSignature
+          })
+        }]
       })
     })
 
     it('submits a claim on disconnect', async function () {
-      await this.plugin.sendMoney(this.transfer.amount)
-
-      // disconnect() makes the plugin submit a claim
-      await this.peerPlugin.disconnect()
+      await this.plugin._handleMoney(null, { requestId: 1, data: this.claimData() })
+      await this.plugin._claimFunds()
 
       // assert that the balance on-ledger was adjusted
-      const paychanid = this.plugin._outgoingChannel
+      const paychanid = this.plugin._incomingChannel
       const chan = await this.api.getPaymentChannel(paychanid)
-      assert.strictEqual(chan.balance, dropsToXrp(this.transfer.amount))
+      assert.strictEqual(chan.balance, dropsToXrp(this.claimAmount))
     })
 
     it('funds a paychan', async function () {

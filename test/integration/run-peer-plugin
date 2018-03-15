@@ -1,0 +1,57 @@
+'use strict'
+
+const ilpPacket = require('ilp-packet')
+const PluginRipple = require('../../index.js')
+const nodeCleanup = require('node-cleanup')
+const Store = require('ilp-store-memory')
+const { autoAcceptLedger } = require('./utils')
+
+// parse opts from env
+const opts = Object.assign({}, JSON.parse(process.env.opts), {
+  _store: new Store()
+})
+
+;(async function () {
+  const plugin = new PluginRipple(opts)
+
+  // const COMMON_OPTS = {
+  //   maxBalance: 'Infinity',
+  //   settleDelay: 2 * 60 * 60, // 2 hours
+  //   token: 'shared_secret',
+  //   rippledServer: 'ws://127.0.0.1:6006',
+  //   maxUnsecured: '5000',
+  //   channelAmount: 100000,
+  //   fundThreshold: '0.9'
+  // }
+  // const plugin = new PluginRipple(Object.assign({}, COMMON_OPTS, {
+  //   address: 'rMD2tFoB5zcC86ZpsTWzC3uwJ9vK2tZk5h',
+  //   secret: 'spz1SxHfsiLyRzqn2hWPkaSk9rqH1',
+  //   peerAddress: 'rMD2tFoB5zcC86ZpsTWzC3uwJ9vK2tZk52',
+  //   _store: new Store(),
+  //   listener: {
+  //     port: 12345,
+  //     secret: 'sharedSecret'
+  //   },
+  //   prefix: 'g.xrp.mypaychan.',
+  //   info: {
+  //     prefix: 'g.xrp.mypaychan.',
+  //     currencyScale: 6,
+  //     currencyCode: 'XRP',
+  //     connector: []
+  //   }
+  // }))
+
+  nodeCleanup(async () => { await plugin.disconnect() })
+  plugin.registerDataHandler((ilp) => {
+    return ilpPacket.serializeIlpFulfill({
+      fulfillment: Buffer.alloc(32),
+      data: Buffer.from('hello world again')
+    })
+  })
+  autoAcceptLedger(plugin._api)
+  try {
+    await plugin.connect()
+  } catch (err) {
+    console.log('Error connecting peer plugin:', err)
+  }
+})()
