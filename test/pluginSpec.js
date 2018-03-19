@@ -47,24 +47,11 @@ describe('Plugin XRP Paychan Symmetric', function () {
       amount: '1000'
     }
 
-    this.signStub = this.sinon.stub(this.plugin._api, 'sign').returns({ signedTransaction: '123' })
-
-    this.submitStub = this.sinon.stub(this.plugin._api, 'submit').callsFake(() => {
-      setImmediate(() => {
-        this.plugin._api.connection.emit('transaction', {
-          transaction: {
-            Sequence: 1,
-            SourceTag: 1,
-            Account: this.plugin._address,
-            Destination: this.plugin._peerAddress,
-            Channel: null
-          },
-          engine_result: 'tesSUCCESS'
-        })
-      })
-      return {
-        resultCode: 'tesSUCCESS',
-        resultMessage: 'Successful'
+    this.submitterStub = this.sinon.stub(this.plugin, '_txSubmitter').resolves({
+      transaction: {
+        Account: 'ra3h9tzcipHTZCdQesMthfx4iBZNEEuHXG',
+        Destination: 'rKwCnwtM6et7BVaCZm97hbU8oXkoohReea',
+        Sequence: 1
       }
     })
   })
@@ -318,8 +305,6 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
       this.channelId = '945BB98D2F03DFA2AED810F8917B2BC344C0AA182A5DB506C16F84593C24244F'
       this.tagStub = this.sinon.stub(util, 'randomTag').returns(1)
-      this.prepareStub = this.sinon.stub(this.plugin._api, 'preparePaymentChannelCreate').resolves({ txJSON: '{}' })
-
       this.loadStub = this.sinon.stub(this.plugin._api, 'getPaymentChannel')
         .callsFake(id => {
           assert.equal(id, this.channelId)
@@ -344,9 +329,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
       await this.plugin._connect()
 
       assert.isTrue(this.tagStub.called, 'should have generated source tag')
-      assert.isTrue(this.prepareStub.called, 'should have generated prepare tx')
-      assert.isTrue(this.signStub.called, 'should have signed xrp tx')
-      assert.isTrue(this.submitStub.called, 'should have submitted tx to ledger')
+      assert.isTrue(this.submitterStub.called, 'should have submitted tx to ledger')
       assert.isTrue(this.loadStub.called, 'should have loaded outgoing channel')
       assert.isTrue(this.reloadStub.called, 'should have reloaded incoming channel')
     })
@@ -360,24 +343,17 @@ describe('Plugin XRP Paychan Symmetric', function () {
       }
 
       this.plugin._incomingChannelDetails = this.channel
-      this.prepareStub = this.sinon.stub(this.plugin._api, 'preparePaymentChannelClaim')
-        .resolves({ txJSON: '{}' })
     })
 
     it('should return if incomingClaim has no signature', async function () {
       delete this.plugin._incomingClaim.signature
-
       await this.plugin._claimFunds()
-
-      assert.isFalse(this.prepareStub.called, 'should not have prepared a claim tx with no signature')
+      assert.isFalse(this.submitterStub.called, 'should not have prepared a claim tx with no signature')
     })
 
     it('should submit tx if incomingClaim is valid', async function () {
       await this.plugin._claimFunds()
-
-      assert.isTrue(this.prepareStub.called, 'tx should be prepared')
-      assert.isTrue(this.signStub.called, 'tx should be signed')
-      assert.isTrue(this.submitStub.called, 'transaction should be submitted to ledger')
+      assert.isTrue(this.submitterStub.calledWith('preparePaymentChannelClaim'))
     })
   })
 
