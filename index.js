@@ -247,7 +247,7 @@ class PluginXrpPaychan extends PluginBtp {
       let ev
       try {
         const txTag = util.randomTag()
-        ev = await this._txSubmitter('preparePaymentChannelCreate', {
+        ev = await this._txSubmitter.submit('preparePaymentChannelCreate', {
           amount: util.dropsToXrp(this._channelAmount),
           destination: this._peerAddress,
           settleDelay: this._settleDelay,
@@ -278,7 +278,7 @@ class PluginXrpPaychan extends PluginBtp {
       return
     }
 
-    return this._txSubmitter('preparePaymentChannelClaim', {
+    await this._txSubmitter.submit('preparePaymentChannelClaim', {
       balance: util.dropsToXrp(this._incomingClaim.amount),
       channel: this._incomingChannel,
       signature: this._incomingClaim.signature.toUpperCase(),

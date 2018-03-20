@@ -47,7 +47,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
       amount: '1000'
     }
 
-    this.submitterStub = this.sinon.stub(this.plugin, '_txSubmitter').resolves({
+    this.submitterStub = this.sinon.stub(this.plugin._txSubmitter, 'submit').resolves({
       transaction: {
         Account: 'ra3h9tzcipHTZCdQesMthfx4iBZNEEuHXG',
         Destination: 'rKwCnwtM6et7BVaCZm97hbU8oXkoohReea',
