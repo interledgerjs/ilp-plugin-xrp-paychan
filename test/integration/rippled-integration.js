@@ -54,8 +54,8 @@ async function exchangePaychanIds (plugin) {
 }
 
 async function teardown () {
-  this.plugin && this.plugin.isConnected() && await this.plugin.disconnect()
-  this.peerPluginProc && this.peerPluginProc.kill('SIGINT')
+  if (this.plugin && this.plugin.isConnected()) await this.plugin.disconnect()
+  if (this.peerPluginProc) this.peerPluginProc.kill('SIGINT')
   return this.api.disconnect()
 }
 
