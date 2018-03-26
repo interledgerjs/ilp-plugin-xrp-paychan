@@ -74,22 +74,28 @@ class PluginXrpPaychan extends PluginBtp {
       .toFixed(6, BigNumber.ROUND_UP)
   }
 
+  async _setIncomingChannel (newId) {
+    if (!this._incomingChannel) {
+      const details = await this._api.getPaymentChannel(newId)
+
+      // second check occurs to prevent race condition where two lookups happen at once
+      if (!this._incomingChannel) {
+        this._validateChannelDetails(details)
+        this._incomingChannel = newId
+        this._incomingChannelDetails = details
+        this._store.set('incoming_channel', this._incomingChannel)
+        await this._watcher.watch(this._incomingChannel)
+      }
+    }
+  }
+
   async _handleData (from, { requestId, data }) {
+    if (!this._connected) throw new Error('not connected')
+
     const { ilp, protocolMap } = this.protocolDataToIlpAndCustom(data)
 
     if (protocolMap.ripple_channel_id) {
-      if (!this._incomingChannel) {
-        const details = await this._api.getPaymentChannel(protocolMap.ripple_channel_id)
-
-        // second check occurs to prevent race condition where two lookups happen at once
-        if (!this._incomingChannel) {
-          this._validateChannelDetails(details)
-          this._incomingChannel = protocolMap.ripple_channel_id
-          this._store.set('incoming_channel', this._incomingChannel)
-          await this._watcher.watch(this._incomingChannel)
-        }
-      }
-
+      await this._setIncomingChannel(protocolMap.ripple_channel_id)
       await this._reloadIncomingChannelDetails()
 
       return [{
@@ -97,6 +103,8 @@ class PluginXrpPaychan extends PluginBtp {
         contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
         data: Buffer.from(this._outgoingChannel || '')
       }]
+    } else if (!this._incomingChannel) {
+      await this._reloadIncomingChannelDetails()
     }
 
     if (protocolMap.info) {
@@ -139,17 +147,28 @@ class PluginXrpPaychan extends PluginBtp {
 
         // TODO: should this send raw bytes instead of text in the future
         debug('got ripple_channel_id response:', response)
-        this._incomingChannel = response
+        const chanId = response
           .protocolData
           .filter(p => p.protocolName === 'ripple_channel_id')[0]
           .data
           .toString()
-        this._store.set('incoming_channel', this._incomingChannel)
-        await this._watcher.watch(this._incomingChannel)
-      } catch (err) { debug(err) }
 
-      if (!this._incomingChannel) {
-        debug('cannot load incoming channel. Peer did not return incoming channel id')
+        this._setIncomingChannel(chanId)
+      } catch (err) {
+        debug('error loading incoming channel.', err)
+        return
+      }
+    } else {
+      debug('refreshing details for incoming channel', this._incomingChannel)
+      try {
+        this._incomingChannelDetails = await this._api.getPaymentChannel(this._incomingChannel)
+        debug('incoming channel details are:', this._incomingChannelDetails)
+      } catch (err) {
+        if (err.name === 'RippledError' && err.message === 'entryNotFound') {
+          debug('incoming payment channel does not exist:', this._incomingChannel)
+        } else {
+          debug(err)
+        }
         return
       }
     }
@@ -184,31 +203,21 @@ class PluginXrpPaychan extends PluginBtp {
       }
     }
 
-    // look up channel on ledger
-    debug('retrieving details for incoming channel', this._incomingChannel)
-    try {
-      this._incomingChannelDetails = await this._api.getPaymentChannel(this._incomingChannel)
-      debug('incoming channel details are:', this._incomingChannelDetails)
-    } catch (err) {
-      if (err.name === 'RippledError' && err.message === 'entryNotFound') {
-        debug('incoming payment channel does not exist:', this._incomingChannel)
-      } else {
-        debug(err)
-      }
-      return
-    }
-
-    this._validateChannelDetails(this._incomingChannelDetails)
-
     this._lastClaimedAmount = new BigNumber(util.xrpToDrops(this._incomingChannelDetails.balance))
-    this._claimIntervalId = setInterval(async () => {
-      if (this._lastClaimedAmount.isLessThan(this._incomingClaim.amount)) {
-        debug('starting automatic claim. amount=' + this._incomingClaim.amount)
-        this._lastClaimedAmount = new BigNumber(this._incomingClaim.amount)
-        await this._claimFunds()
-        debug('claimed funds.')
-      }
-    }, this._claimInterval)
+    this._setupAutoClaim()
+  }
+
+  _setupAutoClaim () {
+    if (!this._claimIntervalId) {
+      this._claimIntervalId = setInterval(async () => {
+        if (this._lastClaimedAmount.isLessThan(this._incomingClaim.amount)) {
+          debug('starting automatic claim. amount=' + this._incomingClaim.amount)
+          this._lastClaimedAmount = new BigNumber(this._incomingClaim.amount)
+          await this._claimFunds()
+          debug('claimed funds.')
+        }
+      }, this._claimInterval)
+    }
   }
 
   _validateChannelDetails (details) {
@@ -292,7 +301,6 @@ class PluginXrpPaychan extends PluginBtp {
     }
 
     this._outgoingChannelDetails = await this._api.getPaymentChannel(this._outgoingChannel)
-    await this._reloadIncomingChannelDetails()
   }
 
   async _claimFunds () {
@@ -372,6 +380,10 @@ class PluginXrpPaychan extends PluginBtp {
   }
 
   async _handleMoney (from, { requestId, data }) {
+    if (!this._incomingChannel) {
+      await this._reloadIncomingChannelDetails()
+    }
+
     const amount = data.amount
     const protocolData = data.protocolData
     const claim = JSON.parse(protocolData
