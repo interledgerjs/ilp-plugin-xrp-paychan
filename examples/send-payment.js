@@ -4,7 +4,7 @@
 const {ILQP, IPR} = require('ilp')
 const uuid = require('uuid')
 
-const Store = require('ilp-plugin-payment-channel-framework/test/helpers/objStore')
+const Store = require('ilp-store-memory')
 const PluginRipple = require('../index')
 
 const SHARED_SECRET = 'shh its a secret'

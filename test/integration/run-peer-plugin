@@ -1,0 +1,30 @@
+'use strict'
+
+const ilpPacket = require('ilp-packet')
+const PluginRipple = require('../../index.js')
+const nodeCleanup = require('node-cleanup')
+const Store = require('ilp-store-memory')
+const { autoAcceptLedger } = require('./utils')
+
+// parse opts from env
+const opts = Object.assign({}, JSON.parse(process.env.opts), {
+  _store: new Store()
+})
+
+;(async function () {
+  const plugin = new PluginRipple(opts)
+
+  nodeCleanup(async () => { await plugin.disconnect() })
+  plugin.registerDataHandler((ilp) => {
+    return ilpPacket.serializeIlpFulfill({
+      fulfillment: Buffer.alloc(32),
+      data: Buffer.from('hello world again')
+    })
+  })
+  autoAcceptLedger(plugin._api)
+  try {
+    await plugin.connect()
+  } catch (err) {
+    console.log('Error connecting peer plugin:', err)
+  }
+})()

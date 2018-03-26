@@ -10,6 +10,7 @@ const nacl = require('tweetnacl')
 const BigNumber = require('bignumber.js')
 const StoreWrapper = require('./store-wrapper')
 const {
+  createSubmitter,
   ChannelWatcher,
   util
 } = require('ilp-plugin-xrp-paychan-shared')
@@ -27,6 +28,7 @@ class PluginXrpPaychan extends PluginBtp {
     this._api = new RippleAPI({ server: this._xrpServer })
     this._secret = opts.secret
     this._address = opts.address || deriveAddress(deriveKeypair(this._secret).publicKey)
+    this._txSubmitter = createSubmitter(this._api, this._address, this._secret)
 
     if (typeof opts.currencyScale !== 'number' && opts.currencyScale !== undefined) {
       throw new Error('opts.currencyScale must be a number if specified.' +
@@ -82,7 +84,7 @@ class PluginXrpPaychan extends PluginBtp {
       return [{
         protocolName: 'ripple_channel_id',
         contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
-        data: Buffer.from(this._outgoingChannel)
+        data: Buffer.from(this._outgoingChannel || '')
       }]
     }
 
@@ -242,53 +244,28 @@ class PluginXrpPaychan extends PluginBtp {
     if (!this._outgoingChannel) {
       debug('creating new payment channel')
 
-      const txTag = util.randomTag()
-      const tx = await this._api.preparePaymentChannelCreate(this._address, {
-        amount: this.baseToXrp(this._channelAmount),
-        destination: this._peerAddress,
-        settleDelay: this._settleDelay,
-        publicKey: 'ED' + Buffer.from(this._keyPair.publicKey).toString('hex').toUpperCase(),
-        sourceTag: txTag
-      })
-
-      debug('created paymentChannelCreate tx', tx.txJSON)
-
-      const signedTx = this._api.sign(tx.txJSON, this._secret)
-      let resultCode
-      let resultMessage
+      let ev
       try {
-        const result = await this._api.submit(signedTx.signedTransaction)
-        resultCode = result.resultCode
-        resultMessage = result.resultMessage
+        const txTag = util.randomTag()
+        ev = await this._txSubmitter.submit('preparePaymentChannelCreate', {
+          amount: util.dropsToXrp(this._channelAmount),
+          destination: this._peerAddress,
+          settleDelay: this._settleDelay,
+          publicKey: 'ED' + Buffer.from(this._keyPair.publicKey).toString('hex').toUpperCase(),
+          sourceTag: txTag
+        })
       } catch (err) {
-        debug('error submitting paymentChannelCreate', err)
+        debug('Error creating payment channel')
         throw err
       }
-      if (resultCode !== 'tesSUCCESS') {
-        const message = 'Error creating the payment channel: ' + resultCode + ' ' + resultMessage
-        debug(message)
-        throw new Error(message)
-      }
 
-      debug('submitted paymentChannelCreate, waiting for tx to be validated (this may take a few seconds)')
-      await new Promise((resolve) => {
-        const handleTransaction = (ev) => {
-          if (ev.transaction.SourceTag !== txTag) return
-          if (ev.transaction.Account !== this._address) return
+      this._outgoingChannel = util.computeChannelId(
+        ev.transaction.Account,
+        ev.transaction.Destination,
+        ev.transaction.Sequence
+      )
+      this._store.set('outgoing_channel', this._outgoingChannel)
 
-          this._outgoingChannel = util.computeChannelId(
-            ev.transaction.Account,
-            ev.transaction.Destination,
-            ev.transaction.Sequence)
-          this._store.set('outgoing_channel', this._outgoingChannel)
-
-          setImmediate(() => this._api.connection
-            .removeListener('transaction', handleTransaction))
-          resolve()
-        }
-
-        this._api.connection.on('transaction', handleTransaction)
-      })
       debug('payment channel successfully created: ', this._outgoingChannel)
     }
 
@@ -301,37 +278,11 @@ class PluginXrpPaychan extends PluginBtp {
       return
     }
 
-    const tx = await this._api.preparePaymentChannelClaim(this._address, {
+    await this._txSubmitter.submit('preparePaymentChannelClaim', {
       balance: util.dropsToXrp(this._incomingClaim.amount),
       channel: this._incomingChannel,
       signature: this._incomingClaim.signature.toUpperCase(),
       publicKey: this._incomingChannelDetails.publicKey
-    })
-
-    const signedTx = this._api.sign(tx.txJSON, this._secret)
-    debug('submitting claim transaction ', tx)
-    const {resultCode, resultMessage} = await this._api.submit(signedTx.signedTransaction)
-    if (resultCode !== 'tesSUCCESS') {
-      debug('Error submitting claim: ', resultMessage)
-      throw new Error('Could not claim funds: ', resultMessage)
-    }
-
-    return new Promise((resolve) => {
-      const handleTransaction = (ev) => {
-        if (ev.transaction.Account !== this._address) return
-        if (ev.transaction.Channel !== this._incomingChannel) return
-
-        if (ev.engine_result === 'tesSUCCESS') {
-          debug('successfully submitted claim', this._incomingClaim)
-        } else {
-          debug('claiming funds failed ', ev)
-        }
-
-        setImmediate(() => this._api.connection
-          .removeListener('transaction', handleTransaction))
-        resolve()
-      }
-      this._api.connection.on('transaction', handleTransaction)
     })
   }
 
@@ -357,8 +308,8 @@ class PluginXrpPaychan extends PluginBtp {
     const encodedClaim = util.encodeClaim(dropClaimAmount, this._outgoingChannel)
     const signature = nacl.sign.detached(encodedClaim, this._keyPair.secretKey)
 
-    debug(`signed outgoing claim for ${dropClaimAmount.toString()} drops on
-      channel ${this._outgoingChannel}`)
+    debug(`signed outgoing claim for ${claimAmount.toString()} drops on ` +
+      `channel ${this._outgoingChannel}`)
 
     if (!this._funding && new BigNumber(dropClaimAmount).isGreaterThan(new BigNumber(util.xrpToDrops(this._outgoingChannelDetails.amount)).times(this._fundThreshold))) {
       this._funding = true

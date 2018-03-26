@@ -11,8 +11,10 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "byline": "^5.0.0",
     "chai": "^4.1.2",
     "chai-as-promised": "^7.1.1",
+    "child-process-promise": "^2.2.1",
     "co-mocha": "^1.2.0",
     "eslint": "^4.9.0",
     "eslint-config-standard": "^10.2.1",
@@ -24,18 +26,20 @@
     "ilp-packet": "^2.2.0",
     "mocha": "^3.5.3",
     "nock": "^9.0.20",
+    "node-cleanup": "^2.1.2",
     "nyc": "^11.4.1",
     "proxyquire": "^1.8.0",
     "sinon": "^3.3.0",
-    "sinon-chai": "^2.13.0"
+    "sinon-chai": "^2.13.0",
+    "through2": "^2.0.3"
   },
   "dependencies": {
     "bignumber.js": "^6.0.0",
     "btp-packet": "^1.2.0",
-    "ilp-plugin-btp": "^1.1.8",
-    "ilp-plugin-xrp-paychan-shared": "^2.0.0",
+    "ilp-plugin-btp": "^1.1.9",
+    "ilp-plugin-xrp-paychan-shared": "^3.0.0",
     "ilp-store-memory": "^1.0.0",
-    "ripple-lib": "^0.17.7",
+    "ripple-lib": "^0.19.0",
     "tweetnacl": "^1.0.0"
   },
   "repository": {
