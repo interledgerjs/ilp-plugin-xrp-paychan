@@ -76,11 +76,17 @@ class PluginXrpPaychan extends PluginBtp {
 
   async _setIncomingChannel (newId) {
     if (!this._incomingChannel) {
+      debug('validating incoming paychan')
       const details = await this._api.getPaymentChannel(newId)
+      this._validateChannelDetails(details)
+
+      debug('checking that peer\'s scale matches')
+      await this._getPeerInfo()
 
       // second check occurs to prevent race condition where two lookups happen at once
       if (!this._incomingChannel) {
-        this._validateChannelDetails(details)
+        debug(`setting incoming channel to`, newId)
+        debug(`channel details are`, details)
         this._incomingChannel = newId
         this._incomingChannelDetails = details
         this._store.set('incoming_channel', this._incomingChannel)
@@ -90,22 +96,10 @@ class PluginXrpPaychan extends PluginBtp {
   }
 
   async _handleData (from, { requestId, data }) {
+    // TODO: should plugin-btp ensure that _handleData is only called if the plugin is connected?
     if (!this._connected) throw new Error('not connected')
 
     const { ilp, protocolMap } = this.protocolDataToIlpAndCustom(data)
-
-    if (protocolMap.ripple_channel_id) {
-      await this._setIncomingChannel(protocolMap.ripple_channel_id)
-      await this._reloadIncomingChannelDetails()
-
-      return [{
-        protocolName: 'ripple_channel_id',
-        contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
-        data: Buffer.from(this._outgoingChannel || '')
-      }]
-    } else if (!this._incomingChannel) {
-      await this._reloadIncomingChannelDetails()
-    }
 
     if (protocolMap.info) {
       debug('got info request from peer')
@@ -117,6 +111,20 @@ class PluginXrpPaychan extends PluginBtp {
           currencyScale: this._currencyScale
         }))
       }]
+    }
+
+    if (protocolMap.ripple_channel_id) {
+      debug('got ripple_channel_id request from peer')
+      await this._setIncomingChannel(protocolMap.ripple_channel_id)
+      await this._reloadIncomingChannelDetails()
+
+      return [{
+        protocolName: 'ripple_channel_id',
+        contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+        data: Buffer.from(this._outgoingChannel || '')
+      }]
+    } else if (!this._incomingChannel) {
+      await this._reloadIncomingChannelDetails()
     }
 
     if (!this._dataHandler) {
@@ -134,6 +142,7 @@ class PluginXrpPaychan extends PluginBtp {
   async _reloadIncomingChannelDetails () {
     if (!this._incomingChannel) {
       debug('quering peer for incoming channel id')
+      let chanId = null
       try {
         const response = await this._call(null, {
           type: BtpPacket.TYPE_MESSAGE,
@@ -147,17 +156,17 @@ class PluginXrpPaychan extends PluginBtp {
 
         // TODO: should this send raw bytes instead of text in the future
         debug('got ripple_channel_id response:', response)
-        const chanId = response
+        chanId = response
           .protocolData
           .filter(p => p.protocolName === 'ripple_channel_id')[0]
           .data
           .toString()
-
-        this._setIncomingChannel(chanId)
       } catch (err) {
-        debug('error loading incoming channel.', err)
+        debug('error requesting incoming channel from peer.', err)
         return
       }
+
+      await this._setIncomingChannel(chanId)
     } else {
       debug('refreshing details for incoming channel', this._incomingChannel)
       try {
@@ -173,9 +182,15 @@ class PluginXrpPaychan extends PluginBtp {
       }
     }
 
+    this._lastClaimedAmount = new BigNumber(util.xrpToDrops(this._incomingChannelDetails.balance))
+    this._setupAutoClaim()
+  }
+
+  async _getPeerInfo () {
     // now uses the info protocol to make sure scales are matching
     let infoResponse
     try {
+      debug('quering peer for info')
       infoResponse = await this._call(null, {
         type: BtpPacket.TYPE_MESSAGE,
         requestId: await util._requestId(),
@@ -196,15 +211,15 @@ class PluginXrpPaychan extends PluginBtp {
     }
 
     if (infoResponse) {
-      const info = JSON.parse(infoResponse.protocolData[0].data.toString())
+      const protocol = infoResponse.protocolData[0]
+      if (protocol.protocolName !== 'info') throw new Error('invalid response to info request')
+      const info = JSON.parse(protocol.data.toString())
+      debug('info subprotocol response is:', info)
       if (info.currencyScale !== this._currencyScale) {
         throw new Error('Fatal! Currency scale mismatch. this=' + this._currencyScale +
           ' peer=' + (info.currencyScale || 6))
       }
     }
-
-    this._lastClaimedAmount = new BigNumber(util.xrpToDrops(this._incomingChannelDetails.balance))
-    this._setupAutoClaim()
   }
 
   _setupAutoClaim () {
@@ -225,8 +240,8 @@ class PluginXrpPaychan extends PluginBtp {
     // claim before the channel closes
     const settleDelay = details.settleDelay
     if (settleDelay < util.MIN_SETTLE_DELAY) {
-      debug(`incoming payment channel has a too low settle delay of ${settleDelay.toString()}
-        seconds. Minimum settle delay is ${util.MIN_SETTLE_DELAY} seconds.`)
+      debug(`incoming payment channel has a too low settle delay of ${settleDelay.toString()}` +
+        ` seconds. Minimum settle delay is ${util.MIN_SETTLE_DELAY} seconds.`)
       throw new Error('settle delay of incoming payment channel too low')
     }
 
@@ -380,6 +395,8 @@ class PluginXrpPaychan extends PluginBtp {
   }
 
   async _handleMoney (from, { requestId, data }) {
+    if (!this._connected) throw new Error('not connected')
+
     if (!this._incomingChannel) {
       await this._reloadIncomingChannelDetails()
     }

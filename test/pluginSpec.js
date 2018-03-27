@@ -1,4 +1,5 @@
-'use strict'
+'use strict' /* eslint-env mocha */
+
 const Plugin = require('..')
 const Store = require('ilp-store-memory')
 const BtpPacket = require('btp-packet')
@@ -85,85 +86,81 @@ describe('Plugin XRP Paychan Symmetric', function () {
   })
 
   describe('_handleData', function () {
-    it('should handle ilp data', async function () {
-      let handled = false
-      this.plugin.registerDataHandler(data => {
-        assert.deepEqual(data, Buffer.alloc(0))
-        handled = true
-        return Buffer.from('test_result')
-      })
-
-      const result = await this.plugin._handleData(null, {
-        requestId: 1,
-        data: this.ilpData
-      })
-
-      assert.isTrue(handled, 'handler should have been called')
-      assert.deepEqual(result, [{
-        protocolName: 'ilp',
-        contentType: BtpPacket.MIME_APPLICATION_OCTET_STREAM,
-        data: Buffer.from('test_result')
-      }], 'result should contain the buffer returned by data handler')
-    })
-
-    it('should throw an error if there is no data handler', async function () {
-      await assert.isRejected(this.plugin._handleData(null, {
-        requestId: 1,
-        data: this.ilpData
-      }), /no request handler registered/)
-    })
-
-    it('should throw an error if there is no ilp data', async function () {
-      this.plugin.registerDataHandler(() => {})
-
-      await assert.isRejected(this.plugin._handleData(null, {
-        requestId: 1,
-        data: { protocolData: [] }
-      }), /no ilp protocol on request/)
-    })
-
-    it('should handle info request', async function () {
-      const result = await this.plugin._handleData(null, {
-        requestId: 1,
-        data: {
-          protocolData: [{
-            protocolName: 'info',
-            contentType: BtpPacket.MIME_APPLICATION_OCTET_STREAM,
-            data: Buffer.from([ util.INFO_REQUEST_ALL ])
-          }]
-        }
-      })
-
-      assert.deepEqual(result, [{
-        protocolName: 'info',
-        contentType: BtpPacket.MIME_APPLICATION_JSON,
-        data: Buffer.from(JSON.stringify({ currencyScale: 6 }))
-      }])
-    })
-
-    it('should handle ripple_channel_id protocol', async function () {
-      // no need to look at the ledger in this test
-      this.getPaymentChannelStub = this.sinon.stub(this.plugin._api, 'getPaymentChannel').resolves(this.channel)
-      this.sinon.stub(this.plugin, '_reloadIncomingChannelDetails').callsFake(() => Promise.resolve())
-      this.sinon.stub(this.plugin._watcher, 'watch').callsFake(() => Promise.resolve())
-      this.plugin._outgoingChannel = 'my_channel_id'
-
-      await this.plugin._handleData(null, {
-        requestId: 1,
-        data: {
-          protocolData: [{
-            protocolName: 'ripple_channel_id',
-            contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
-            data: Buffer.from('peer_channel_id')
-          }]
-        }
-      })
-    })
-
-    describe('ripple_channel_id', function () {
+    describe('ilp data', function () {
       beforeEach(function () {
+        this.plugin._connected = true
+        this.plugin._incomingChannel = 'ASDF1234'
+      })
+
+      it('should handle ilp data', async function () {
+        let handled = false
+        this.plugin.registerDataHandler(data => {
+          assert.deepEqual(data, Buffer.alloc(0))
+          handled = true
+          return Buffer.from('test_result')
+        })
+
+        const result = await this.plugin._handleData(null, {
+          requestId: 1,
+          data: this.ilpData
+        })
+
+        assert.isTrue(handled, 'handler should have been called')
+        assert.deepEqual(result, [{
+          protocolName: 'ilp',
+          contentType: BtpPacket.MIME_APPLICATION_OCTET_STREAM,
+          data: Buffer.from('test_result')
+        }], 'result should contain the buffer returned by data handler')
+      })
+
+      it('should throw an error if there is no data handler', async function () {
+        await assert.isRejected(this.plugin._handleData(null, {
+          requestId: 1,
+          data: this.ilpData
+        }), /no request handler registered/)
+      })
+
+      it('should throw an error if there is no ilp data', async function () {
+        this.plugin.registerDataHandler(() => {})
+
+        await assert.isRejected(this.plugin._handleData(null, {
+          requestId: 1,
+          data: { protocolData: [] }
+        }), /no ilp protocol on request/)
+      })
+    })
+
+    describe('info subprotocol', function () {
+      beforeEach(function () {
+        this.plugin._connected = true
+        this.plugin._incomingChannel = 'ASDF1234'
+      })
+
+      it('should handle info request', async function () {
+        const result = await this.plugin._handleData(null, {
+          requestId: 1,
+          data: {
+            protocolData: [{
+              protocolName: 'info',
+              contentType: BtpPacket.MIME_APPLICATION_OCTET_STREAM,
+              data: Buffer.from([ util.INFO_REQUEST_ALL ])
+            }]
+          }
+        })
+
+        assert.deepEqual(result, [{
+          protocolName: 'info',
+          contentType: BtpPacket.MIME_APPLICATION_JSON,
+          data: Buffer.from(JSON.stringify({ currencyScale: 6 }))
+        }])
+      })
+    })
+
+    describe('ripple_channel_id subprotocol', function () {
+      beforeEach(function () {
+        this.plugin._connected = true
         this.getPaymentChannelStub = this.sinon.stub(this.plugin._api, 'getPaymentChannel').resolves()
-        this.sinon.stub(this.plugin, '_reloadIncomingChannelDetails').callsFake(() => Promise.resolve())
+        this.sinon.stub(this.plugin, '_reloadIncomingChannelDetails').resolves()
         this.validateChannelDetailsStub = this.sinon.stub(this.plugin, '_validateChannelDetails').returns()
         this.channelIdRequest = {
           requestId: 1,
@@ -175,9 +172,10 @@ describe('Plugin XRP Paychan Symmetric', function () {
             }]
           }
         }
+        this.sinon.stub(this.plugin, '_call').rejects(new Error('info protocol is not supported'))
 
         // no need to look at the ledger in this test
-        this.watchStub = this.sinon.stub(this.plugin._watcher, 'watch').callsFake(() => Promise.resolve())
+        this.watchStub = this.sinon.stub(this.plugin._watcher, 'watch').resolves()
         this.plugin._outgoingChannel = 'my_channel_id'
       })
 
@@ -202,13 +200,14 @@ describe('Plugin XRP Paychan Symmetric', function () {
       })
 
       it('should not race two requests', async function () {
+        const storeSpy = sinon.spy(this.plugin._store, 'set').withArgs('incoming_channel')
         await Promise.all([
           this.plugin._handleData(null, this.channelIdRequest),
           this.plugin._handleData(null, this.channelIdRequest)
         ])
 
-        assert.equal(this.validateChannelDetailsStub.callCount, 1,
-          'validate channel details should only be called once, otherwise there was a race')
+        assert.equal(storeSpy.callCount, 1,
+          'incoming channel should only be written once to the store, otherwise there was a race')
       })
 
       it('should not reset existing channel with ripple_channel_id', async function () {
@@ -228,37 +227,47 @@ describe('Plugin XRP Paychan Symmetric', function () {
   describe('_reloadIncomingChannelDetails', function () {
     beforeEach(function () {
       this.plugin._outgoingChannel = 'my_channel_id'
-      this.plugin._incomingChannel = 'peer_channel_id'
+      // this.plugin._incomingChannel = 'peer_channel_id'
+
+      this.callStub = this.sinon.stub(this.plugin, '_call')
+      this.callStub.callsFake(async (...args) => {
+        const {protocolMap} = this.plugin.protocolDataToIlpAndCustom(args[1].data)
+        if (protocolMap.ripple_channel_id) {
+          return {
+            protocolData: [{
+              protocolName: 'ripple_channel_id',
+              contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+              data: Buffer.from('peer_channel_id')
+            }]
+          }
+        } else if (protocolMap.info) {
+          throw new Error('info protocol is not supported')
+        }
+      })
+
+      this.getChanStub = this.sinon.stub(this.plugin._api, 'getPaymentChannel').resolves(this.channel)
     })
 
     it('should return if it cannot query the peer for a channel', async function () {
       // simulate the plugin not being able to get incoming channel
-      this.plugin._incomingChannel = null
-      const stub = this.sinon.stub(this.plugin, '_call').callsFake(() => Promise.resolve({ protocolData: [] }))
-      const spy = this.sinon.spy(this.plugin._api, 'getPaymentChannel')
+      this.callStub.resolves({ protocolData: [] })
 
       await this.plugin._reloadIncomingChannelDetails()
 
-      assert.isTrue(stub.called, 'should have tried to query peer for balance')
-      assert.isTrue(spy.notCalled, 'should not have reached getPaymentChannel')
+      assert.isTrue(this.callStub.called, 'should have tried to query peer for balance')
+      assert.isTrue(this.getChanStub.notCalled, 'should not have reached getPaymentChannel')
     })
 
     it('should return if getPaymentChannel gives a rippled error', async function () {
-      this.sinon.stub(this.plugin, '_call').rejects(new Error('info protocol is not supported'))
-      const stub = this.sinon.stub(this.plugin._api, 'getPaymentChannel')
-        .callsFake(() => {
-          throw new Error('there was an error!')
-        })
-
+      this.plugin._incomingChannel = 'peer_channel_id'
+      this.getChanStub.rejects(new Error('errrror!'))
       await this.plugin._reloadIncomingChannelDetails()
-      assert.isTrue(stub.called, 'should have queried ledger for paychan')
+      assert.isTrue(this.getChanStub.called, 'should have queried ledger for paychan')
     })
 
     it('should throw if settleDelay is too soon', async function () {
+      this.plugin._incomingChannel = null
       this.channel.settleDelay = util.MIN_SETTLE_DELAY - 1
-      this.sinon.stub(this.plugin, '_call').rejects(new Error('info protocol is not supported'))
-      this.sinon.stub(this.plugin._api, 'getPaymentChannel')
-        .resolves(this.channel)
 
       await assert.isRejected(this.plugin._reloadIncomingChannelDetails(),
         /settle delay of incoming payment channel too low/)
@@ -266,39 +275,23 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     it('should throw if cancelAfter is specified', async function () {
       this.channel.cancelAfter = Date.now() + 1000
-      this.sinon.stub(this.plugin, '_call').rejects(new Error('info protocol is not supported'))
-      this.sinon.stub(this.plugin._api, 'getPaymentChannel')
-        .resolves(this.channel)
-
       await assert.isRejected(this.plugin._reloadIncomingChannelDetails(),
         /cancelAfter must not be set/)
     })
 
     it('should throw if expiration is specified', async function () {
       this.channel.expiration = Date.now() + 1000
-      this.sinon.stub(this.plugin, '_call').rejects(new Error('info protocol is not supported'))
-      this.sinon.stub(this.plugin._api, 'getPaymentChannel')
-        .resolves(this.channel)
-
       await assert.isRejected(this.plugin._reloadIncomingChannelDetails(),
         /expiration must not be set/)
     })
 
     it('should throw if destination does not match our account', async function () {
       this.channel.destination = this.plugin._peerAddress
-      this.sinon.stub(this.plugin, '_call').rejects(new Error('info protocol is not supported'))
-      this.sinon.stub(this.plugin._api, 'getPaymentChannel')
-        .resolves(this.channel)
-
       await assert.isRejected(this.plugin._reloadIncomingChannelDetails(),
         /Channel destination address wrong/)
     })
 
     it('should return if all details are ok', async function () {
-      this.sinon.stub(this.plugin, '_call').rejects(new Error('info protocol is not supported'))
-      this.sinon.stub(this.plugin._api, 'getPaymentChannel')
-        .resolves(this.channel)
-
       await this.plugin._reloadIncomingChannelDetails()
       assert.isTrue(!!this.plugin._claimIntervalId,
         'claim interval should be started if reload was successful')
@@ -306,12 +299,12 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     describe('with high scale', function () {
       beforeEach(function () {
+        this.plugin._incomingChannel = 'peer_channel_id'
         this.plugin._currencyScale = 9
       })
 
       it('should throw an error if the peer doesn\'t support info', async function () {
-        this.sinon.stub(this.plugin, '_call')
-          .rejects(new Error('no ilp protocol on request'))
+        this.callStub.rejects(new Error('no ilp protocol on request'))
 
         assert.isRejected(this.plugin._reloadIncomingChannelDetails(),
           /peer is unable to accomodate our currencyScale; they are on an out of date version of this plugin/)
@@ -319,34 +312,28 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
       it('should not throw an error if the peer doesn\'t support info but our scale is 6', async function () {
         this.plugin._currencyScale = 6
-        this.sinon.stub(this.plugin, '_call')
-          .rejects(new Error('no ilp protocol on request'))
+        this.callStub.rejects(new Error('no ilp protocol on request'))
 
         await this.plugin._reloadIncomingChannelDetails()
       })
 
       it('should throw an error if the peer scale does not match ours', async function () {
-        this.sinon.stub(this.plugin, '_call')
-          .resolves({ protocolData: [{
-            protocolName: 'info',
-            contentType: BtpPacket.MIME_APPLICATION_JSON,
-            data: Buffer.from(JSON.stringify({ currencyScale: 8 }))
-          }]})
+        this.callStub.resolves({ protocolData: [{
+          protocolName: 'info',
+          contentType: BtpPacket.MIME_APPLICATION_JSON,
+          data: Buffer.from(JSON.stringify({ currencyScale: 8 }))
+        }]})
 
         assert.isRejected(this.plugin._reloadIncomingChannelDetails(),
           /Fatal! Currency scale mismatch./)
       })
 
       it('should succeed if scales match', async function () {
-        this.sinon.stub(this.plugin, '_call')
-          .resolves({ protocolData: [{
-            protocolName: 'info',
-            contentType: BtpPacket.MIME_APPLICATION_JSON,
-            data: Buffer.from(JSON.stringify({ currencyScale: 9 }))
-          }]})
-
-        this.sinon.stub(this.plugin._api, 'getPaymentChannel')
-          .resolves(this.channel)
+        this.callStub.resolves({ protocolData: [{
+          protocolName: 'info',
+          contentType: BtpPacket.MIME_APPLICATION_JSON,
+          data: Buffer.from(JSON.stringify({ currencyScale: 9 }))
+        }]})
 
         await this.plugin._reloadIncomingChannelDetails()
         assert.isTrue(!!this.plugin._claimIntervalId,
@@ -369,9 +356,6 @@ describe('Plugin XRP Paychan Symmetric', function () {
           assert.equal(id, this.channelId)
           return Promise.resolve(this.channel)
         })
-
-      this.reloadStub = this.sinon.stub(this.plugin, '_reloadIncomingChannelDetails')
-        .resolves(null)
     })
 
     it('should load outgoing channel if exists', async function () {
@@ -381,7 +365,6 @@ describe('Plugin XRP Paychan Symmetric', function () {
       await this.plugin._connect()
 
       assert.isTrue(this.loadStub.called, 'should have loaded outgoing channel')
-      assert.isTrue(this.reloadStub.called, 'should have reloaded incoming channel')
     })
 
     it('should prepare a payment channel', async function () {
@@ -390,7 +373,6 @@ describe('Plugin XRP Paychan Symmetric', function () {
       assert.isTrue(this.tagStub.called, 'should have generated source tag')
       assert.isTrue(this.submitterStub.called, 'should have submitted tx to ledger')
       assert.isTrue(this.loadStub.called, 'should have loaded outgoing channel')
-      assert.isTrue(this.reloadStub.called, 'should have reloaded incoming channel')
     })
   })
 
@@ -513,6 +495,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
   describe('_handleMoney', function () {
     beforeEach(function () {
+      this.plugin._connected = true
       this.claimAmount = '100'
       this.claimSignature = 'abcdefg'
       this.claimData = () => ({
