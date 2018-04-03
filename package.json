@@ -5,8 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "nyc --reporter=lcov mocha --",
-    "integration": "nyc --reporter=lcov mocha test/integration --",
-    "lint": "eslint ."
+    "integration": "nyc --clean false mocha test/integration --",
+    "lint": "standard"
   },
   "author": "",
   "license": "ISC",
@@ -16,13 +16,6 @@
     "chai-as-promised": "^7.1.1",
     "child-process-promise": "^2.2.1",
     "co-mocha": "^1.2.0",
-    "eslint": "^4.9.0",
-    "eslint-config-standard": "^10.2.1",
-    "eslint-plugin-chai-friendly": "^0.4.0",
-    "eslint-plugin-import": "^2.7.0",
-    "eslint-plugin-node": "^5.1.0",
-    "eslint-plugin-promise": "^3.5.0",
-    "eslint-plugin-standard": "^3.0.1",
     "ilp-packet": "^2.2.0",
     "mocha": "^3.5.3",
     "nock": "^9.0.20",
@@ -31,6 +24,7 @@
     "proxyquire": "^1.8.0",
     "sinon": "^3.3.0",
     "sinon-chai": "^2.13.0",
+    "standard": "^11.0.1",
     "through2": "^2.0.3"
   },
   "dependencies": {
