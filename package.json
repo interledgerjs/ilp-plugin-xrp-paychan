@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "nyc --reporter=lcov mocha --",
-    "integration": "mocha test/integration --",
+    "integration": "nyc --clean false mocha test/integration --",
     "lint": "standard"
   },
   "author": "",
