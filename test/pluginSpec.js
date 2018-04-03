@@ -113,8 +113,8 @@ describe('Plugin XRP Paychan Symmetric', function () {
         }], 'result should contain the buffer returned by data handler')
       })
 
-      it('should throw an error if there is no data handler', async function () {
-        await assert.isRejected(this.plugin._handleData(null, {
+      it('should throw an error if there is no data handler', function () {
+        return assert.isRejected(this.plugin._handleData(null, {
           requestId: 1,
           data: this.ilpData
         }), /no request handler registered/)
