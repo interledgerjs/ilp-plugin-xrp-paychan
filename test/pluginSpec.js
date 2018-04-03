@@ -227,7 +227,6 @@ describe('Plugin XRP Paychan Symmetric', function () {
   describe('_reloadIncomingChannelDetails', function () {
     beforeEach(function () {
       this.plugin._outgoingChannel = 'my_channel_id'
-      // this.plugin._incomingChannel = 'peer_channel_id'
 
       this.callStub = this.sinon.stub(this.plugin, '_call')
       this.callStub.callsFake(async (...args) => {
@@ -291,10 +290,18 @@ describe('Plugin XRP Paychan Symmetric', function () {
         /Channel destination address wrong/)
     })
 
-    it('should return if all details are ok', async function () {
+    it('should setup auto claim if all details are ok', async function () {
+      const clock = sinon.useFakeTimers({toFake: ['setInterval']})
       await this.plugin._reloadIncomingChannelDetails()
       assert.isTrue(!!this.plugin._claimIntervalId,
         'claim interval should be started if reload was successful')
+
+      this.plugin._incomingClaim = {
+        amount: this.plugin._lastClaimedAmount.plus(1).toString()
+      }
+      const stub = sinon.stub(this.plugin, '_claimFunds').resolves()
+      clock.tick(util.DEFAULT_CLAIM_INTERVAL)
+      assert(stub.calledOnce, 'Expected claimFunds to be called once')
     })
   })
 
