@@ -296,49 +296,49 @@ describe('Plugin XRP Paychan Symmetric', function () {
       assert.isTrue(!!this.plugin._claimIntervalId,
         'claim interval should be started if reload was successful')
     })
+  })
 
-    describe('with high scale', function () {
-      beforeEach(function () {
-        this.plugin._incomingChannel = 'peer_channel_id'
-        this.plugin._currencyScale = 9
-      })
+  describe('_getPeerInfo', function () {
+    beforeEach(function () {
+      this.plugin._incomingChannel = 'peer_channel_id'
+      this.plugin._currencyScale = 9
 
-      it('should throw an error if the peer doesn\'t support info', async function () {
-        this.callStub.rejects(new Error('no ilp protocol on request'))
+      this.callStub = this.sinon.stub(this.plugin, '_call')
+    })
 
-        assert.isRejected(this.plugin._reloadIncomingChannelDetails(),
-          /peer is unable to accomodate our currencyScale; they are on an out of date version of this plugin/)
-      })
+    it('should throw an error if the peer doesn\'t support info', async function () {
+      this.callStub.rejects(new Error('no ilp protocol on request'))
 
-      it('should not throw an error if the peer doesn\'t support info but our scale is 6', async function () {
-        this.plugin._currencyScale = 6
-        this.callStub.rejects(new Error('no ilp protocol on request'))
+      return assert.isRejected(this.plugin._getPeerInfo(),
+        /peer is unable to accomodate our currencyScale; they are on an out of date version of this plugin/)
+    })
 
-        await this.plugin._reloadIncomingChannelDetails()
-      })
+    it('should not throw an error if the peer doesn\'t support info but our scale is 6', function () {
+      this.plugin._currencyScale = 6
+      this.callStub.rejects(new Error('no ilp protocol on request'))
 
-      it('should throw an error if the peer scale does not match ours', async function () {
-        this.callStub.resolves({ protocolData: [{
-          protocolName: 'info',
-          contentType: BtpPacket.MIME_APPLICATION_JSON,
-          data: Buffer.from(JSON.stringify({ currencyScale: 8 }))
-        }]})
+      return assert.isFulfilled(this.plugin._getPeerInfo())
+    })
 
-        assert.isRejected(this.plugin._reloadIncomingChannelDetails(),
-          /Fatal! Currency scale mismatch./)
-      })
+    it('should throw an error if the peer scale does not match ours', function () {
+      this.callStub.resolves({ protocolData: [{
+        protocolName: 'info',
+        contentType: BtpPacket.MIME_APPLICATION_JSON,
+        data: Buffer.from(JSON.stringify({ currencyScale: 8 }))
+      }]})
 
-      it('should succeed if scales match', async function () {
-        this.callStub.resolves({ protocolData: [{
-          protocolName: 'info',
-          contentType: BtpPacket.MIME_APPLICATION_JSON,
-          data: Buffer.from(JSON.stringify({ currencyScale: 9 }))
-        }]})
+      return assert.isRejected(this.plugin._getPeerInfo(),
+        /Fatal! Currency scale mismatch./)
+    })
 
-        await this.plugin._reloadIncomingChannelDetails()
-        assert.isTrue(!!this.plugin._claimIntervalId,
-          'claim interval should be started if reload was successful')
-      })
+    it('should succeed if scales match', async function () {
+      this.callStub.resolves({ protocolData: [{
+        protocolName: 'info',
+        contentType: BtpPacket.MIME_APPLICATION_JSON,
+        data: Buffer.from(JSON.stringify({ currencyScale: 9 }))
+      }]})
+
+      return assert.isFulfilled(this.plugin._getPeerInfo())
     })
   })
 
