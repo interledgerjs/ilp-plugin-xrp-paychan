@@ -75,7 +75,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
     it('should throw an error on non-number currencyScale', function () {
       this.opts.currencyScale = 'foo'
       assert.throws(() => new Plugin(this.opts),
-        /opts.currencyScale must be a number if specified/)
+        /currency scale must be a number if specified/)
     })
 
     it('should not throw an error on number currencyScale', function () {

@@ -30,13 +30,20 @@ class PluginXrpPaychan extends PluginBtp {
     this._address = opts.address || deriveAddress(deriveKeypair(this._secret).publicKey)
     this._txSubmitter = createSubmitter(this._api, this._address, this._secret)
 
-    if (typeof opts.currencyScale !== 'number' && opts.currencyScale !== undefined) {
-      throw new Error('opts.currencyScale must be a number if specified.' +
-        ' type=' + (typeof opts.currencyScale) +
-        ' value=' + opts.currencyScale)
+    if (opts.assetScale && opts.currencyScale) {
+      throw new Error('opts.assetScale is an alias for opts.currencyScale;' +
+        'only one must be specified')
     }
 
-    this._currencyScale = (typeof opts.currencyScale === 'number') ? opts.currencyScale : 6
+    const currencyScale = opts.assetScale || opts.currencyScale
+
+    if (typeof currencyScale !== 'number' && currencyScale !== undefined) {
+      throw new Error('currency scale must be a number if specified.' +
+        ' type=' + (typeof currencyScale) +
+        ' value=' + currencyScale)
+    }
+
+    this._currencyScale = (typeof currencyScale === 'number') ? currencyScale : 6
 
     this._peerAddress = opts.peerAddress // TODO: try to get this over the paychan?
     this._fundThreshold = opts.fundThreshold || DEFAULT_FUND_THRESHOLD
