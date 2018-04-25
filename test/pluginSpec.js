@@ -365,6 +365,33 @@ describe('Plugin XRP Paychan Symmetric', function () {
         })
     })
 
+    describe('high scale', function () {
+      beforeEach(function () {
+        this.plugin._currencyScale = 9
+        this.plugin._channelAmount = 1e9
+        this.plugin._outgoingClaim = {
+          amount: '990',
+          signature: '61626364656667'
+        }
+      })
+
+      it('should use the right units for payment channel create', async function () {
+        await this.plugin._connect()
+
+        assert.isTrue(this.submitterStub.called, 'should have submitted tx to ledger')
+        assert.deepEqual(this.submitterStub.firstCall.args, [
+          'preparePaymentChannelCreate',
+          {
+            amount: '1.000000',
+            destination: 'rKwCnwtM6et7BVaCZm97hbU8oXkoohReea',
+            settleDelay: 3600,
+            publicKey: 'ED9BE8997EFFA0A6C6FE9244D0FF8B47D7BEE85A7AF2BC8390FA29474A6D085164',
+            sourceTag: 1
+          }
+        ])
+      })
+    })
+
     it('should load outgoing channel if exists', async function () {
       this.plugin._store.load('outgoing_channel')
       this.plugin._store.set('outgoing_channel', this.channelId)
@@ -402,6 +429,31 @@ describe('Plugin XRP Paychan Symmetric', function () {
     it('should submit tx if incomingClaim is valid', async function () {
       await this.plugin._claimFunds()
       assert.isTrue(this.submitterStub.calledWith('preparePaymentChannelClaim'))
+    })
+
+    describe('high scale', function () {
+      beforeEach(function () {
+        this.plugin._currencyScale = 9
+        this.plugin._incomingClaim = {
+          amount: '3000',
+          signature: 'some signature'
+        }
+      })
+
+      it('should use the right units for payment channel create', async function () {
+        await this.plugin._claimFunds()
+
+        assert.isTrue(this.submitterStub.called, 'should have submitted tx to ledger')
+        assert.deepEqual(this.submitterStub.firstCall.args, [
+          'preparePaymentChannelClaim',
+          {
+            balance: '0.000003',
+            channel: null,
+            signature: 'SOME SIGNATURE',
+            publicKey: 'abcdefg'
+          }
+        ])
+      })
     })
   })
 
