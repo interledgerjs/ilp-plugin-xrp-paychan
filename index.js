@@ -130,7 +130,7 @@ class PluginXrpPaychan extends PluginBtp {
         contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
         data: Buffer.from(this._outgoingChannel || '')
       }]
-    } else if (!this._incomingChannel) {
+    } else if (!this._incomingChannel || !this._incomingChannelDetails) {
       await this._reloadIncomingChannelDetails()
     }
 
@@ -292,6 +292,7 @@ class PluginXrpPaychan extends PluginBtp {
 
     if (this._incomingChannel) {
       await this._watcher.watch(this._incomingChannel)
+      await this._reloadIncomingChannelDetails()
     }
 
     if (!this._outgoingChannel) {
@@ -404,7 +405,7 @@ class PluginXrpPaychan extends PluginBtp {
   async _handleMoney (from, { requestId, data }) {
     if (!this._connected) throw new Error('not connected')
 
-    if (!this._incomingChannel) {
+    if (!this._incomingChannelDetails || !this._incomingChannel) {
       await this._reloadIncomingChannelDetails()
     }
 
