@@ -29,6 +29,7 @@ class PluginXrpPaychan extends PluginBtp {
     this._secret = opts.secret
     this._address = opts.address || deriveAddress(deriveKeypair(this._secret).publicKey)
     this._txSubmitter = createSubmitter(this._api, this._address, this._secret)
+    this._maxFeePercent = opts.maxFeePercent || 0.01
 
     if (opts.assetScale && opts.currencyScale) {
       throw new Error('opts.assetScale is an alias for opts.currencyScale;' +
@@ -229,10 +230,17 @@ class PluginXrpPaychan extends PluginBtp {
     }
   }
 
+  async _isClaimProfitable () {
+    const income = new BigNumber(this._incomingClaim.amount).minus(this._lastClaimedAmount)
+    const fee = new BigNumber(await this._api.getFee())
+
+    return income.isGreaterThan(0) && fee.dividedBy(income).isLessThan(this._maxFeePercent)
+  }
+
   _setupAutoClaim () {
     if (!this._claimIntervalId) {
       this._claimIntervalId = setInterval(async () => {
-        if (this._lastClaimedAmount.isLessThan(this._incomingClaim.amount)) {
+        if (await this._isClaimProfitable()) {
           debug('starting automatic claim. amount=' + this._incomingClaim.amount)
           this._lastClaimedAmount = new BigNumber(this._incomingClaim.amount)
           await this._claimFunds()

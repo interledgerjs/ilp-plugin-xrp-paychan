@@ -292,16 +292,40 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     it('should setup auto claim if all details are ok', async function () {
       const clock = sinon.useFakeTimers({toFake: ['setInterval']})
+      const feeStub = this.sinon.stub(this.plugin._api, 'getFee').resolves(1)
+
       await this.plugin._reloadIncomingChannelDetails()
       assert.isTrue(!!this.plugin._claimIntervalId,
         'claim interval should be started if reload was successful')
 
       this.plugin._incomingClaim = {
-        amount: this.plugin._lastClaimedAmount.plus(1).toString()
+        amount: this.plugin._lastClaimedAmount.plus(101).toString()
       }
       const stub = sinon.stub(this.plugin, '_claimFunds').resolves()
+
       clock.tick(util.DEFAULT_CLAIM_INTERVAL)
+      await new Promise(resolve => setImmediate(resolve))
+
       assert(stub.calledOnce, 'Expected claimFunds to be called once')
+    })
+
+    it('should not auto claim if fee is too high', async function () {
+      const clock = sinon.useFakeTimers({toFake: ['setInterval']})
+      const feeStub = this.sinon.stub(this.plugin._api, 'getFee').resolves(10)
+
+      await this.plugin._reloadIncomingChannelDetails()
+      assert.isTrue(!!this.plugin._claimIntervalId,
+        'claim interval should be started if reload was successful')
+
+      this.plugin._incomingClaim = {
+        amount: this.plugin._lastClaimedAmount.plus(1000).toString()
+      }
+      const stub = sinon.stub(this.plugin, '_claimFunds').resolves()
+
+      clock.tick(util.DEFAULT_CLAIM_INTERVAL)
+      await new Promise(resolve => setImmediate(resolve))
+
+      assert.isFalse(stub.called, 'claim should not have been called')
     })
   })
 
