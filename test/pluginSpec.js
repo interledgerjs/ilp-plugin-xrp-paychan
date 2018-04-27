@@ -401,6 +401,17 @@ describe('Plugin XRP Paychan Symmetric', function () {
       assert.isTrue(this.loadStub.called, 'should have loaded outgoing channel')
     })
 
+    it('should load incoming channel details even if incoming channel already exists', async function () {
+      this.plugin._store.load('incoming_channel')
+      this.plugin._store.set('incoming_channel', this.channelId)
+      const spy = this.sinon.spy(this.plugin, '_reloadIncomingChannelDetails')
+
+      await this.plugin._connect()
+
+      assert.deepEqual(this.loadStub.firstCall.args, [ this.channelId ])
+      assert.isTrue(spy.calledOnce)
+    })
+
     it('should prepare a payment channel', async function () {
       await this.plugin._connect()
 
