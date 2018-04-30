@@ -240,9 +240,15 @@ describe('Plugin XRP Paychan Symmetric', function () {
             }]
           }
         } else if (protocolMap.info) {
-          throw new Error('info protocol is not supported')
+          return this.callStub.__info()
         }
       })
+
+      // bind to callStub so that we can change this function for the high
+      // scale version
+      this.callStub.__info = () => {
+        throw new Error('info protocol is not supported')
+      }
 
       this.getChanStub = this.sinon.stub(this.plugin._api, 'getPaymentChannel').resolves(this.channel)
     })
@@ -292,7 +298,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     it('should setup auto claim if all details are ok', async function () {
       const clock = sinon.useFakeTimers({toFake: ['setInterval']})
-      const feeStub = this.sinon.stub(this.plugin._api, 'getFee').resolves(1)
+      this.sinon.stub(this.plugin._api, 'getFee').resolves('0.000001')
 
       await this.plugin._reloadIncomingChannelDetails()
       assert.isTrue(!!this.plugin._claimIntervalId,
@@ -311,7 +317,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     it('should not auto claim if fee is too high', async function () {
       const clock = sinon.useFakeTimers({toFake: ['setInterval']})
-      const feeStub = this.sinon.stub(this.plugin._api, 'getFee').resolves(10)
+      this.sinon.stub(this.plugin._api, 'getFee').resolves('0.000011')
 
       await this.plugin._reloadIncomingChannelDetails()
       assert.isTrue(!!this.plugin._claimIntervalId,
@@ -326,6 +332,57 @@ describe('Plugin XRP Paychan Symmetric', function () {
       await new Promise(resolve => setImmediate(resolve))
 
       assert.isFalse(stub.called, 'claim should not have been called')
+    })
+
+    describe('with high scale', function () {
+      beforeEach(function () {
+        this.plugin._currencyScale = 9
+        this.plugin._channelAmount = 1e9
+        this.plugin._outgoingClaim = {
+          amount: '990',
+          signature: '61626364656667'
+        }
+
+        this.callStub.__info = () => ({
+          protocolData: [{
+            protocolName: 'info',
+            contentType: BtpPacket.MIME_APPLICATION_JSON,
+            data: Buffer.from(JSON.stringify({ currencyScale: 9 }))
+          }]
+        })
+      })
+
+      it('should use correct units when determining if claim is profitable', async function () {
+        const clock = sinon.useFakeTimers({toFake: ['setInterval']})
+        this.sinon.stub(this.plugin._api, 'getFee').resolves('0.000010')
+
+        await this.plugin._reloadIncomingChannelDetails()
+        assert.isTrue(!!this.plugin._claimIntervalId,
+          'claim interval should be started if reload was successful')
+
+        this.plugin._incomingClaim = {
+          amount: this.plugin._lastClaimedAmount.plus(1000000).toString()
+        }
+
+        const stub = sinon.stub(this.plugin, '_claimFunds').resolves()
+        const spy = sinon.spy(this.plugin, '_isClaimProfitable')
+
+        clock.tick(util.DEFAULT_CLAIM_INTERVAL)
+        await new Promise(resolve => setImmediate(resolve))
+
+        assert(stub.calledOnce, 'Expected claimFunds to be called once')
+        assert(spy.calledOnce, 'Expected profitability to be checked')
+
+        this.plugin._incomingClaim = {
+          amount: this.plugin._lastClaimedAmount.plus(999999).toString()
+        }
+
+        clock.tick(util.DEFAULT_CLAIM_INTERVAL)
+        await new Promise(resolve => setImmediate(resolve))
+
+        assert(stub.calledOnce, 'Expected claimFunds to still only be called once')
+        assert(spy.calledTwice, 'Expected profitability to be checked twice')
+      })
     })
   })
 
