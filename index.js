@@ -190,7 +190,7 @@ class PluginXrpPaychan extends PluginBtp {
       }
     }
 
-    this._lastClaimedAmount = new BigNumber(util.xrpToDrops(this._incomingChannelDetails.balance))
+    this._lastClaimedAmount = new BigNumber(this.xrpToBase(this._incomingChannelDetails.balance))
     this._setupAutoClaim()
   }
 
@@ -232,9 +232,9 @@ class PluginXrpPaychan extends PluginBtp {
 
   async _isClaimProfitable () {
     const income = new BigNumber(this._incomingClaim.amount).minus(this._lastClaimedAmount)
-    const fee = new BigNumber(await this._api.getFee())
+    const fee = new BigNumber(this.xrpToBase(await this._api.getFee()))
 
-    return income.isGreaterThan(0) && fee.dividedBy(income).isLessThan(this._maxFeePercent)
+    return income.isGreaterThan(0) && fee.dividedBy(income).lte(this._maxFeePercent)
   }
 
   _setupAutoClaim () {
