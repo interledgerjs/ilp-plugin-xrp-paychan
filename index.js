@@ -61,6 +61,7 @@ class PluginXrpPaychan extends PluginBtp {
     this._incomingChannelDetails = null
     this._incomingClaim = null
     this._outgoingClaim = null
+    this._paychanReady = false
 
     this._watcher = new ChannelWatcher(60 * 1000, this._api)
     this._watcher.on('channelClose', () => {
@@ -104,8 +105,7 @@ class PluginXrpPaychan extends PluginBtp {
   }
 
   async _handleData (from, { requestId, data }) {
-    // TODO: should plugin-btp ensure that _handleData is only called if the plugin is connected?
-    if (!this._connected) throw new Error('not connected')
+    if (!this._paychanReady) throw new Error('paychan initialization has not completed or has failed.')
 
     const { ilp, protocolMap } = this.protocolDataToIlpAndCustom(data)
 
@@ -331,6 +331,7 @@ class PluginXrpPaychan extends PluginBtp {
       debug('payment channel successfully created: ', this._outgoingChannel)
     }
 
+    this._paychanReady = true
     this._outgoingChannelDetails = await this._api.getPaymentChannel(this._outgoingChannel)
   }
 
@@ -411,7 +412,7 @@ class PluginXrpPaychan extends PluginBtp {
   }
 
   async _handleMoney (from, { requestId, data }) {
-    if (!this._connected) throw new Error('not connected')
+    if (!this._paychanReady) throw new Error('paychan initialization has not completed or has failed.')
 
     if (!this._incomingChannelDetails || !this._incomingChannel) {
       await this._reloadIncomingChannelDetails()

@@ -88,7 +88,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
   describe('_handleData', function () {
     describe('ilp data', function () {
       beforeEach(function () {
-        this.plugin._connected = true
+        this.plugin._paychanReady = true
         this.plugin._incomingChannel = 'ASDF1234'
       })
 
@@ -132,7 +132,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     describe('info subprotocol', function () {
       beforeEach(function () {
-        this.plugin._connected = true
+        this.plugin._paychanReady = true
         this.plugin._incomingChannel = 'ASDF1234'
       })
 
@@ -158,7 +158,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
     describe('ripple_channel_id subprotocol', function () {
       beforeEach(function () {
-        this.plugin._connected = true
+        this.plugin._paychanReady = true
         this.getPaymentChannelStub = this.sinon.stub(this.plugin._api, 'getPaymentChannel').resolves()
         this.sinon.stub(this.plugin, '_reloadIncomingChannelDetails').resolves()
         this.validateChannelDetailsStub = this.sinon.stub(this.plugin, '_validateChannelDetails').returns()
@@ -496,6 +496,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
     it('should prepare a payment channel', async function () {
       await this.plugin._connect()
 
+      assert.isTrue(this.plugin._paychanReady)
       assert.isTrue(this.tagStub.called, 'should have generated source tag')
       assert.isTrue(this.submitterStub.called, 'should have submitted tx to ledger')
       assert.isTrue(this.loadStub.called, 'should have loaded outgoing channel')
@@ -646,7 +647,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
   describe('_handleMoney', function () {
     beforeEach(function () {
-      this.plugin._connected = true
+      this.plugin._paychanReady = true
       this.claimAmount = '100'
       this.claimSignature = 'abcdefg'
       this.claimData = () => ({
