@@ -378,7 +378,7 @@ class PluginXrpPaychan extends PluginBtp {
       util.fundChannel({
         api: this._api,
         channel: this._outgoingChannel,
-        amount: util.xrpToDrops(this.baseToXrp(this._channelAmount)),
+        amount: util.xrpToDrops(this._outgoingChannelDetails.amount),
         address: this._address,
         secret: this._secret
       })
