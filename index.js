@@ -147,20 +147,24 @@ class PluginXrpPaychan extends PluginBtp {
     return this.ilpAndCustomToProtocolData({ ilp: response })
   }
 
+  async _sendRippleChannelIdRequest () {
+    return this._call(null, {
+      type: BtpPacket.TYPE_MESSAGE,
+      requestId: await util._requestId(),
+      data: { protocolData: [{
+        protocolName: 'ripple_channel_id',
+        contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+        data: Buffer.from(this._outgoingChannel)
+      }] }
+    })
+  }
+
   async _reloadIncomingChannelDetails () {
     if (!this._incomingChannel) {
       debug('quering peer for incoming channel id')
       let chanId = null
       try {
-        const response = await this._call(null, {
-          type: BtpPacket.TYPE_MESSAGE,
-          requestId: await util._requestId(),
-          data: { protocolData: [{
-            protocolName: 'ripple_channel_id',
-            contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
-            data: Buffer.from(this._outgoingChannel)
-          }] }
-        })
+        const response = await this._sendRippleChannelIdRequest()
 
         // TODO: should this send raw bytes instead of text in the future
         debug('got ripple_channel_id response:', response)
@@ -331,8 +335,24 @@ class PluginXrpPaychan extends PluginBtp {
       debug('payment channel successfully created: ', this._outgoingChannel)
     }
 
+    await this._reloadOutgoingChannelDetails()
     this._paychanReady = true
-    this._outgoingChannelDetails = await this._api.getPaymentChannel(this._outgoingChannel)
+  }
+
+  async _reloadOutgoingChannelDetails () {
+    while (true) {
+      try {
+        this._outgoingChannelDetails = await this._api.getPaymentChannel(this._outgoingChannel)
+        break
+      } catch (e) {
+        if (e.name === 'TimeoutError') {
+          await new Promise(resolve => setTimeout(resolve, 2000))
+          continue
+        } else {
+          throw e
+        }
+      }
+    }
   }
 
   async _claimFunds () {
@@ -382,7 +402,9 @@ class PluginXrpPaychan extends PluginBtp {
         address: this._address,
         secret: this._secret
       })
-        .then(() => {
+        .then(async () => {
+          await this._sendRippleChannelIdRequest()
+          await this._reloadOutgoingChannelDetails()
           this._funding = false
         })
         .catch((e) => {
