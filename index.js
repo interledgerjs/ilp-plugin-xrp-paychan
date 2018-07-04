@@ -18,7 +18,7 @@ const {
 // constants
 const CHANNEL_KEYS = 'ilp-plugin-xrp-paychan-channel-keys'
 const DEFAULT_CHANNEL_AMOUNT_XRP = 1
-const DEFAULT_FUND_THRESHOLD = 0.9
+const DEFAULT_FUND_THRESHOLD = 0.5
 
 class PluginXrpPaychan extends PluginBtp {
   constructor (opts) {
