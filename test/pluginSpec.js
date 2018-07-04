@@ -606,6 +606,54 @@ describe('Plugin XRP Paychan Symmetric', function () {
       })
     })
 
+    describe('funding', function () {
+      beforeEach(function () {
+        this.plugin._funding = false
+        this.fundStub = this.sinon.stub(util, 'fundChannel').resolves()
+        this.sinon.stub(this.plugin, '_call').resolves(null)
+        this.plugin._outgoingChannelDetails = {
+          settleDelay: util.MIN_SETTLE_DELAY + 1,
+          destination: this.plugin._address,
+          publicKey: 'abcdefg',
+          balance: '0',
+          amount: '10'
+        }
+      })
+
+      it('should not issue fund if claim is below threshold', async function () {
+        const sendRippleChannelIdStub = this.sinon.stub(this.plugin, '_sendRippleChannelIdRequest')
+        const reloadOutgoingStub = this.sinon.stub(this.plugin, '_reloadOutgoingChannelDetails')
+
+        await this.plugin.sendMoney('5000000')
+        assert.isFalse(this.fundStub.called, 'fund should not have been called')
+        assert.isFalse(sendRippleChannelIdStub.called, 'should not tell peer to reload channel')
+        assert.isFalse(reloadOutgoingStub.called, 'should not reload outgoing channel')
+      })
+
+      it('should issue fund if claim is above threshold', async function () {
+        await this.plugin.sendMoney('5000001')
+        assert.isTrue(this.fundStub.called, 'fund should have been called')
+        assert.deepEqual(this.fundStub.firstCall.args, [{
+          api: this.plugin._api,
+          channel: 'my_channel_id',
+          amount: '10000000',
+          address: this.plugin._address,
+          secret: this.plugin._secret
+        }])
+      })
+
+      it('should reload details after fund', async function () {
+        const sendRippleChannelIdStub = this.sinon.stub(this.plugin, '_sendRippleChannelIdRequest')
+        const reloadOutgoingStub = this.sinon.stub(this.plugin, '_reloadOutgoingChannelDetails')
+
+        await this.plugin.sendMoney('5000001')
+
+        assert.isTrue(this.fundStub.called, 'fund should have been called')
+        assert.isTrue(sendRippleChannelIdStub.called, 'should tell peer to reload channel')
+        assert.isTrue(reloadOutgoingStub.called, 'should reload outgoing channel')
+      })
+    })
+
     describe('with high scale', function () {
       beforeEach(function () {
         this.plugin._currencyScale = 9
