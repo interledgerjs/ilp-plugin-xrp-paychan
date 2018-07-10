@@ -346,7 +346,7 @@ class PluginXrpPaychan extends PluginBtp {
         break
       } catch (e) {
         if (e.name === 'TimeoutError') {
-          debug('timed out while loading outgoing channel details. retrying in 2s.' +
+          log.debug('timed out while loading outgoing channel details. retrying in 2s.' +
             ' channel=' + this._outgoingChannel)
           await new Promise(resolve => setTimeout(resolve, 2000))
           continue
