@@ -10,6 +10,7 @@ const PluginBtp = require('ilp-plugin-btp')
 const nacl = require('tweetnacl')
 const BigNumber = require('bignumber.js')
 const StoreWrapper = require('./store-wrapper')
+const { MoneyNotSentError } = require('./src/lib/constants')
 const {
   createSubmitter,
   ChannelWatcher,
@@ -392,6 +393,13 @@ class PluginXrpPaychan extends PluginBtp {
 
   async sendMoney (amount) {
     const claimAmount = new BigNumber(this._outgoingClaim.amount).plus(amount)
+    if (claimAmount.gt(this.xrpToBase(this._outgoingChannelDetails.amount))) {
+      throw new MoneyNotSentError('claim amount exceeds channel balance.' +
+        ' claimAmount=' + claimAmount +
+        ' channelAmount=' + this.xrpToBase(this._outgoingChannelDetails.amount) +
+        ' channel=' + this._outgoingChannel)
+    }
+
     const dropClaimAmount = util.xrpToDrops(this.baseToXrp(claimAmount))
     const encodedClaim = util.encodeClaim(dropClaimAmount, this._outgoingChannel)
     const signature = nacl.sign.detached(encodedClaim, this._keyPair.secretKey)

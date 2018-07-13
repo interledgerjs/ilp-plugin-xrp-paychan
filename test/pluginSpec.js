@@ -5,6 +5,7 @@ const Store = require('ilp-store-memory')
 const BtpPacket = require('btp-packet')
 const { util } = require('ilp-plugin-xrp-paychan-shared')
 const nacl = require('tweetnacl')
+const { MoneyNotSentError } = require('../src/lib/constants')
 
 const EventEmitter = require('events')
 const chai = require('chai')
@@ -582,6 +583,9 @@ describe('Plugin XRP Paychan Symmetric', function () {
       this.plugin._funding = true // turn off the funding path
       this.plugin._outgoingChannel = 'my_channel_id'
       this.plugin._outgoingClaim = { amount: '0' }
+      this.plugin._outgoingChannelDetails = {
+        amount: '10'
+      }
       this._outgoingClaim = {
         amount: '100',
         signature: '61626364656667'
@@ -680,6 +684,11 @@ describe('Plugin XRP Paychan Symmetric', function () {
         assert.deepEqual(this.encodeStub.getCall(0).args, [ '2', 'my_channel_id' ])
         assert.deepEqual(this.encodeStub.getCall(1).args, [ '2', 'my_channel_id' ])
       })
+    })
+
+    it('should throw an error signing a claim higher than channel amount', async function () {
+      await assert.isRejected(this.plugin.sendMoney(11 * 10e6), MoneyNotSentError,
+        /claim amount exceeds channel balance. claimAmount=110000000 channelAmount=10000000 channel=my_channel_id/)
     })
 
     it('should sign a claim and submit it to the other side', async function () {

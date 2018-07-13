@@ -15,8 +15,16 @@ const xrpToDrops = (xrp) => new BigNumber(xrp).mul(DROPS_PER_XRP).toString()
 
 const sleep = (time) => new Promise((resolve) => setTimeout(resolve, time))
 
+class MoneyNotSentError extends Error {
+  constructor (...args) {
+    super(...args)
+    this.name = 'MoneyNotSentError'
+  }
+}
+
 module.exports = {
   // helper functions
+  MoneyNotSentError,
   sleep,
   dropsToXrp,
   xrpToDrops,
