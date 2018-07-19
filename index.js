@@ -54,8 +54,10 @@ class PluginXrpPaychan extends PluginBtp {
     this._claimInterval = opts.claimInterval || util.DEFAULT_CLAIM_INTERVAL
     this._settleDelay = opts.settleDelay || util.MIN_SETTLE_DELAY
 
-    const keyPairSeed = util.hmac(this._secret, CHANNEL_KEYS + this._peerAddress)
-    this._keyPair = nacl.sign.keyPair.fromSeed(keyPairSeed)
+    if (this._peerAddress) {
+      const keyPairSeed = util.hmac(this._secret, CHANNEL_KEYS + this._peerAddress)
+      this._keyPair = nacl.sign.keyPair.fromSeed(keyPairSeed)
+    }
 
     this._store = new StoreWrapper(opts._store)
     this._outgoingChannel = null
@@ -86,6 +88,16 @@ class PluginXrpPaychan extends PluginBtp {
     return new BigNumber(amount)
       .div(Math.pow(10, this._currencyScale))
       .toFixed(6, BigNumber.ROUND_UP)
+  }
+
+  _setPeerAddress (peerAddress) {
+    if (!this._peerAddress && peerAddress) {
+      this._log.debug(`setting peer address to`, peerAddress)
+      this._peerAddress = peerAddress
+
+      const keyPairSeed = util.hmac(this._secret, CHANNEL_KEYS + this._peerAddress)
+      this._keyPair = nacl.sign.keyPair.fromSeed(keyPairSeed)
+    }
   }
 
   async _setIncomingChannel (newId) {
@@ -126,6 +138,17 @@ class PluginXrpPaychan extends PluginBtp {
       }]
     }
 
+    if (protocolMap.xrp_address) {
+      this._log.debug('got xrp_address request from peer')
+      this._setPeerAddress(protocolMap.xrp_address)
+
+      return [{
+        protocolName: 'xrp_address',
+        contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+        data: Buffer.from(this._address || '')
+      }]
+    }
+
     if (protocolMap.ripple_channel_id) {
       this._log.debug('got ripple_channel_id request from peer')
       await this._setIncomingChannel(protocolMap.ripple_channel_id)
@@ -136,6 +159,8 @@ class PluginXrpPaychan extends PluginBtp {
         contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
         data: Buffer.from(this._outgoingChannel || '')
       }]
+
+    // TODO: why is this being done? should it reload when the protocol _is_ ripple_channel_id?
     } else if (!this._incomingChannel || !this._incomingChannelDetails) {
       await this._reloadIncomingChannelDetails()
     }
@@ -160,6 +185,18 @@ class PluginXrpPaychan extends PluginBtp {
         protocolName: 'ripple_channel_id',
         contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
         data: Buffer.from(this._outgoingChannel)
+      }] }
+    })
+  }
+
+  async _sendXrpAddressRequest () {
+    return this._call(null, {
+      type: BtpPacket.TYPE_MESSAGE,
+      requestId: await util._requestId(),
+      data: { protocolData: [{
+        protocolName: 'xrp_address',
+        contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+        data: Buffer.from(this._address)
       }] }
     })
   }
@@ -292,7 +329,7 @@ class PluginXrpPaychan extends PluginBtp {
     await this._api.connect()
     await this._api.connection.request({
       command: 'subscribe',
-      accounts: [ this._address, this._peerAddress ]
+      accounts: [ this._address ]
     })
     this._log.info('connected to rippled')
 
@@ -310,6 +347,24 @@ class PluginXrpPaychan extends PluginBtp {
     if (this._incomingChannel) {
       await this._watcher.watch(this._incomingChannel)
       await this._reloadIncomingChannelDetails()
+    }
+
+    if (!this._peerAddress) {
+      try {
+        this._log.error('No peer xrp address was specified; fetching from peer.')
+        const data = await this._sendXrpAddressRequest()
+        const peerAddress = data
+          .protocolData
+          .filter(p => p.protocolName === 'xrp_address')[0]
+          .data
+          .toString()
+
+        this._setPeerAddress(peerAddress)
+      } catch (e) {
+        this._log.error('No peer address was specified and peer does not support xrp_address protocol.' +
+          ' error=' + e.message)
+        throw e
+      }
     }
 
     if (!this._outgoingChannel) {
