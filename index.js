@@ -66,6 +66,7 @@ class PluginXrpPaychan extends PluginBtp {
     this._incomingClaim = null
     this._outgoingClaim = null
     this._paychanReady = false
+    this._reloadingChannel = false
 
     this._log = (api && api.log) || log
     this._log.trace = this._log.trace || Debug(this._log.debug.namespace + ':trace')
@@ -101,23 +102,48 @@ class PluginXrpPaychan extends PluginBtp {
   }
 
   async _setIncomingChannel (newId) {
-    if (!this._incomingChannel) {
-      this._log.debug('validating incoming paychan')
-      const details = await this._api.getPaymentChannel(newId)
-      this._validateChannelDetails(details)
+    if (newId === this._incomingChannel) {
+      return
+    }
 
-      this._log.trace('checking that peer\'s scale matches')
-      await this._getPeerInfo()
+    // We're changing the details so don't accept packets.
+    this._reloadingChannel = true
 
-      // second check occurs to prevent race condition where two lookups happen at once
-      if (!this._incomingChannel) {
-        this._log.debug(`setting incoming channel to`, newId)
-        this._log.trace(`channel details are`, details)
-        this._incomingChannel = newId
-        this._incomingChannelDetails = details
-        this._store.set('incoming_channel', this._incomingChannel)
-        await this._watcher.watch(this._incomingChannel)
+    this._log.debug('validating new paychan. id=' + newId)
+    const details = await this._api.getPaymentChannel(newId)
+    this._validateChannelDetails(details)
+
+    this._log.trace('checking that peer\'s scale matches')
+    await this._getPeerInfo()
+
+    if (this._incomingChannel && newId !== this._incomingChannel) {
+      this._log.debug('new paychan does not match old paychan. new=' + newId, 'old=' + this._incomingChannel)
+      const oldDetails = this._incomingChannelDetails || await this._api.getPaymentChannel(this._incomingChannel)
+
+      if (new BigNumber(this.baseToXrp(this._incomingClaim.amount)).gt(oldDetails.amount)) {
+        await this._claimFunds()
       }
+
+      // re-check in case of race conditions
+      if (this._incomingChannel && newId !== this._incomingChannel) {
+        delete this._incomingChannelDetails
+        delete this._incomingClaim
+        delete this._incomingChannel
+      }
+    }
+
+    if (!this._incomingChannel) {
+      this._reloadingChannel = false
+      this._log.debug(`setting incoming channel to`, newId)
+      this._log.trace(`channel details are`, details)
+      this._incomingChannel = newId
+      this._incomingChannelDetails = details
+      this._lastClaimedAmount = new BigNumber(this.xrpToBase(this._incomingChannelDetails.balance))
+      this._incomingClaim = { amount: this._lastClaimedAmount.toString() }
+      this._lastClaimedAmount = new BigNumber(this.xrpToBase(this._incomingChannelDetails.balance))
+      this._store.set('incoming_channel', this._incomingChannel)
+      this._store.set('incoming_claim', JSON.stringify(this._incomingClaim))
+      await this._watcher.watch(this._incomingChannel)
     }
   }
 
@@ -150,18 +176,22 @@ class PluginXrpPaychan extends PluginBtp {
     }
 
     if (protocolMap.ripple_channel_id) {
-      this._log.debug('got ripple_channel_id request from peer')
-      await this._setIncomingChannel(protocolMap.ripple_channel_id)
-      await this._reloadIncomingChannelDetails()
+      this._log.debug('got ripple_channel_id request from peer. id=' + protocolMap.ripple_channel_id)
+      await this._reloadIncomingChannelDetails(protocolMap.ripple_channel_id)
 
       return [{
         protocolName: 'ripple_channel_id',
         contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
         data: Buffer.from(this._outgoingChannel || '')
       }]
+    }
 
-    // TODO: why is this being done? should it reload when the protocol _is_ ripple_channel_id?
-    } else if (!this._incomingChannel || !this._incomingChannelDetails) {
+    if (this._reloadingChannel) {
+      throw new Error('channel details are being reloaded.')
+    }
+
+    // make sure to load channel details if they don't exist yet
+    if (!this._incomingChannel || !this._incomingChannelDetails) {
       await this._reloadIncomingChannelDetails()
     }
 
@@ -201,14 +231,13 @@ class PluginXrpPaychan extends PluginBtp {
     })
   }
 
-  async _reloadIncomingChannelDetails () {
-    if (!this._incomingChannel) {
+  async _reloadIncomingChannelDetails (peerChannelId) {
+    let chanId = peerChannelId
+
+    if (!chanId) {
       this._log.debug('querying peer for incoming channel id')
-      let chanId = null
       try {
         const response = await this._sendRippleChannelIdRequest()
-
-        // TODO: should this send raw bytes instead of text in the future
         this._log.trace('got ripple_channel_id response:', response)
         chanId = response
           .protocolData
@@ -219,12 +248,16 @@ class PluginXrpPaychan extends PluginBtp {
         this._log.debug('error requesting incoming channel from peer.', err)
         return
       }
+    }
 
+    if (!this._incomingChannel || this._incomingChannel !== chanId) {
+      this._log.debug('setting incoming channel. old=' + this._incomingChannel, 'new=' + chanId)
       await this._setIncomingChannel(chanId)
     } else {
       this._log.debug('refreshing details for incoming channel', this._incomingChannel)
       try {
         this._incomingChannelDetails = await this._api.getPaymentChannel(this._incomingChannel)
+        this._lastClaimedAmount = new BigNumber(this.xrpToBase(this._incomingChannelDetails.balance))
         this._log.trace('incoming channel details are:', this._incomingChannelDetails)
       } catch (err) {
         if (err.name === 'RippledError' && err.message === 'entryNotFound') {
@@ -236,7 +269,6 @@ class PluginXrpPaychan extends PluginBtp {
       }
     }
 
-    this._lastClaimedAmount = new BigNumber(this.xrpToBase(this._incomingChannelDetails.balance))
     this._setupAutoClaim()
   }
 
