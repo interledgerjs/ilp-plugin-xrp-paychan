@@ -160,8 +160,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
     describe('ripple_channel_id subprotocol', function () {
       beforeEach(function () {
         this.plugin._paychanReady = true
-        this.getPaymentChannelStub = this.sinon.stub(this.plugin._api, 'getPaymentChannel').resolves()
-        this.sinon.stub(this.plugin, '_reloadIncomingChannelDetails').resolves()
+        this.getPaymentChannelStub = this.sinon.stub(this.plugin._api, 'getPaymentChannel').resolves(this.channel)
         this.validateChannelDetailsStub = this.sinon.stub(this.plugin, '_validateChannelDetails').returns()
         this.channelIdRequest = {
           requestId: 1,
@@ -174,6 +173,10 @@ describe('Plugin XRP Paychan Symmetric', function () {
           }
         }
         this.sinon.stub(this.plugin, '_call').rejects(new Error('info protocol is not supported'))
+        this.plugin._incomingClaim = {
+          amount: '100',
+          signature: 'some signature'
+        }
 
         // no need to look at the ledger in this test
         this.watchStub = this.sinon.stub(this.plugin._watcher, 'watch').resolves()
@@ -184,6 +187,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
         const result = await this.plugin._handleData(null, this.channelIdRequest)
 
         assert.equal(this.plugin._incomingChannel, 'peer_channel_id', 'incoming channel should be set')
+        assert.deepEqual(this.plugin._incomingChannelDetails, this.channel, 'incoming channel details should be set')
         assert.isTrue(this.watchStub.called, 'should be watching channel')
         assert.deepEqual(result, [{
           protocolName: 'ripple_channel_id',
@@ -211,7 +215,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
           'incoming channel should only be written once to the store, otherwise there was a race')
       })
 
-      it('should not reset existing channel with ripple_channel_id', async function () {
+      it('should reset existing channel with ripple_channel_id, after claiming', async function () {
         // no need to look at the ledger in this test
         this.plugin._incomingChannel = 'peer_channel_id'
         this.plugin._outgoingChannel = 'my_channel_id'
@@ -219,8 +223,8 @@ describe('Plugin XRP Paychan Symmetric', function () {
         this.channelIdRequest.data.protocolData[0].data = Buffer.from('fake_peer_channel_id')
         await this.plugin._handleData(null, this.channelIdRequest)
 
-        assert.equal(this.plugin._incomingChannel, 'peer_channel_id', 'incoming channel should be set')
-        assert.isFalse(this.watchStub.called, 'should not be watching new channel')
+        assert.equal(this.plugin._incomingChannel, 'fake_peer_channel_id', 'incoming channel should be set')
+        assert.isTrue(this.watchStub.called, 'should be watching new channel')
       })
     })
   })
@@ -252,6 +256,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
       }
 
       this.getChanStub = this.sinon.stub(this.plugin._api, 'getPaymentChannel').resolves(this.channel)
+      this.sinon.stub(this.plugin._watcher.api, 'connect').resolves()
     })
 
     it('should return if it cannot query the peer for a channel', async function () {
@@ -314,6 +319,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
       await new Promise(resolve => setImmediate(resolve))
 
       assert(stub.calledOnce, 'Expected claimFunds to be called once')
+      clock.restore()
     })
 
     it('should not auto claim if fee is too high', async function () {
@@ -333,6 +339,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
       await new Promise(resolve => setImmediate(resolve))
 
       assert.isFalse(stub.called, 'claim should not have been called')
+      clock.restore()
     })
 
     describe('with high scale', function () {
@@ -383,6 +390,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
         assert(stub.calledOnce, 'Expected claimFunds to still only be called once')
         assert(spy.calledTwice, 'Expected profitability to be checked twice')
+        clock.restore()
       })
     })
   })
