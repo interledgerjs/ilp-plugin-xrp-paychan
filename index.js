@@ -109,7 +109,7 @@ class PluginXrpPaychan extends PluginBtp {
     // We're changing the details so don't accept packets.
     this._reloadingChannel = true
 
-    this._log.debug('validating new paychan. id=' + newId)
+    this._log.trace('validating new paychan. id=' + newId)
     const details = await this._api.getPaymentChannel(newId)
     this._validateChannelDetails(details)
 
@@ -117,11 +117,14 @@ class PluginXrpPaychan extends PluginBtp {
     await this._getPeerInfo()
 
     if (this._incomingChannel && newId !== this._incomingChannel) {
-      this._log.debug('new paychan does not match old paychan. new=' + newId, 'old=' + this._incomingChannel)
-      const oldDetails = this._incomingChannelDetails || await this._api.getPaymentChannel(this._incomingChannel)
-
-      if (new BigNumber(this.baseToXrp(this._incomingClaim.amount)).gt(oldDetails.amount)) {
-        await this._claimFunds()
+      this._log.trace('new paychan does not match old paychan. new=' + newId, 'old=' + this._incomingChannel)
+      try {
+        const oldDetails = this._incomingChannelDetails || await this._api.getPaymentChannel(this._incomingChannel)
+        if (new BigNumber(this.baseToXrp(this._incomingClaim.amount)).gt(oldDetails.amount)) {
+          await this._claimFunds()
+        }
+      } catch (e) {
+        this._log.error('unable to load old incoming channel details. error=', e)
       }
 
       // re-check in case of race conditions
