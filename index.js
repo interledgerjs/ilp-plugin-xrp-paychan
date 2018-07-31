@@ -48,16 +48,11 @@ class PluginXrpPaychan extends PluginBtp {
 
     this._currencyScale = (typeof currencyScale === 'number') ? currencyScale : 6
 
-    this._peerAddress = opts.peerAddress // TODO: try to get this over the paychan?
+    this._setPeerAddress(opts.peerAddress)
     this._fundThreshold = opts.fundThreshold || DEFAULT_FUND_THRESHOLD
     this._channelAmount = opts.channelAmount || this.xrpToBase(DEFAULT_CHANNEL_AMOUNT_XRP)
     this._claimInterval = opts.claimInterval || util.DEFAULT_CLAIM_INTERVAL
     this._settleDelay = opts.settleDelay || util.MIN_SETTLE_DELAY
-
-    if (this._peerAddress) {
-      const keyPairSeed = util.hmac(this._secret, CHANNEL_KEYS + this._peerAddress)
-      this._keyPair = nacl.sign.keyPair.fromSeed(keyPairSeed)
-    }
 
     this._store = new StoreWrapper(opts._store)
     this._outgoingChannel = null
@@ -116,6 +111,7 @@ class PluginXrpPaychan extends PluginBtp {
     this._log.trace('checking that peer\'s scale matches')
     await this._getPeerInfo()
 
+    // re-check in case of race conditions
     if (this._incomingChannel && newId !== this._incomingChannel) {
       this._log.trace('new paychan does not match old paychan. new=' + newId, 'old=' + this._incomingChannel)
       try {
@@ -143,7 +139,6 @@ class PluginXrpPaychan extends PluginBtp {
       this._incomingChannelDetails = details
       this._lastClaimedAmount = new BigNumber(this.xrpToBase(this._incomingChannelDetails.balance))
       this._incomingClaim = { amount: this._lastClaimedAmount.toString() }
-      this._lastClaimedAmount = new BigNumber(this.xrpToBase(this._incomingChannelDetails.balance))
       this._store.set('incoming_channel', this._incomingChannel)
       this._store.set('incoming_claim', JSON.stringify(this._incomingClaim))
       await this._watcher.watch(this._incomingChannel)
@@ -174,7 +169,7 @@ class PluginXrpPaychan extends PluginBtp {
       return [{
         protocolName: 'xrp_address',
         contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
-        data: Buffer.from(this._address || '')
+        data: Buffer.from(this._address)
       }]
     }
 
