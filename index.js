@@ -116,7 +116,7 @@ class PluginXrpPaychan extends PluginBtp {
       this._log.trace('new paychan does not match old paychan. new=' + newId, 'old=' + this._incomingChannel)
       try {
         const oldDetails = this._incomingChannelDetails || await this._api.getPaymentChannel(this._incomingChannel)
-        if (new BigNumber(this.baseToXrp(this._incomingClaim.amount)).gt(oldDetails.amount)) {
+        if (new BigNumber(this.baseToXrp(this._incomingClaim.amount)).gt(oldDetails.balance)) {
           await this._claimFunds()
         }
       } catch (e) {

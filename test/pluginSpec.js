@@ -93,6 +93,14 @@ describe('Plugin XRP Paychan Symmetric', function () {
         this.plugin._incomingChannel = 'ASDF1234'
       })
 
+      it('should throw if paychan is not ready', async function () {
+        this.plugin._paychanReady = false
+        await assert.isRejected(this.plugin._handleData(null, {
+          requestId: 1,
+          data: this.ilpData
+        }), /paychan initialization has not completed or has failed/)
+      })
+
       it('should handle ilp data', async function () {
         let handled = false
         this.plugin.registerDataHandler(data => {
@@ -128,6 +136,34 @@ describe('Plugin XRP Paychan Symmetric', function () {
           requestId: 1,
           data: { protocolData: [] }
         }), /no ilp protocol on request/)
+      })
+    })
+
+    describe('xrp_address subprotocol', function () {
+      beforeEach(function () {
+        this.plugin._paychanReady = true
+        this.plugin._incomingChannel = 'ASDF1234'
+        this.setPeerAddressStub = this.sinon.stub(this.plugin, '_setPeerAddress')
+      })
+
+      it('should handle xrp_address request', async function () {
+        const result = await this.plugin._handleData(null, {
+          requestId: 1,
+          data: {
+            protocolData: [{
+              protocolName: 'xrp_address',
+              contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+              data: Buffer.from('peer_xrp_address')
+            }]
+          }
+        })
+
+        assert.deepEqual(result, [{
+          protocolName: 'xrp_address',
+          contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+          data: Buffer.from(this.plugin._address)
+        }])
+        assert.isTrue(this.setPeerAddressStub.calledWith('peer_xrp_address'))
       })
     })
 
@@ -179,6 +215,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
         }
 
         // no need to look at the ledger in this test
+        this.claimStub = this.sinon.stub(this.plugin, '_claimFunds').resolves()
         this.watchStub = this.sinon.stub(this.plugin._watcher, 'watch').resolves()
         this.plugin._outgoingChannel = 'my_channel_id'
       })
@@ -225,6 +262,78 @@ describe('Plugin XRP Paychan Symmetric', function () {
 
         assert.equal(this.plugin._incomingChannel, 'fake_peer_channel_id', 'incoming channel should be set')
         assert.isTrue(this.watchStub.called, 'should be watching new channel')
+        assert.isFalse(this.claimStub.called, 'should not have issued claim')
+      })
+
+      it('should issue claim is there are unclaimed funds while resetting channel id', async function () {
+        // no need to look at the ledger in this test
+        this.plugin._incomingChannel = 'peer_channel_id'
+        this.plugin._outgoingChannel = 'my_channel_id'
+
+        // set claim amount higher than channel balance
+        this.plugin._incomingClaim.amount = '101000000'
+
+        this.channelIdRequest.data.protocolData[0].data = Buffer.from('fake_peer_channel_id')
+        await this.plugin._handleData(null, this.channelIdRequest)
+
+        assert.equal(this.plugin._incomingChannel, 'fake_peer_channel_id', 'incoming channel should be set')
+        assert.isTrue(this.watchStub.called, 'should be watching new channel')
+        assert.isTrue(this.claimStub.called, 'should have issued claim')
+      })
+
+      it('should continue if a claim cannot be performed', async function () {
+        // no need to look at the ledger in this test
+        this.plugin._incomingChannel = 'peer_channel_id'
+        this.plugin._outgoingChannel = 'my_channel_id'
+        this.claimStub.rejects(new Error('error!'))
+
+        // set claim amount higher than channel balance
+        this.plugin._incomingClaim.amount = '101000000'
+
+        this.channelIdRequest.data.protocolData[0].data = Buffer.from('fake_peer_channel_id')
+        await this.plugin._handleData(null, this.channelIdRequest)
+
+        assert.equal(this.plugin._incomingChannel, 'fake_peer_channel_id', 'incoming channel should be set')
+        assert.isTrue(this.watchStub.called, 'should be watching new channel')
+        assert.isTrue(this.claimStub.called, 'should have issued claim')
+      })
+
+      it('should not allow ILP packets while channel is reloading', async function () {
+        // no need to look at the ledger in this test
+        this.plugin._incomingChannel = 'peer_channel_id'
+        this.plugin._outgoingChannel = 'my_channel_id'
+
+        let claimAssertionSucceeded = false
+        this.claimStub.callsFake(async () => {
+          await assert.isRejected(this.plugin._handleData(null, {
+            requestId: 1,
+            data: this.ilpData
+          }), /channel details are being reloaded/)
+          claimAssertionSucceeded = true
+        })
+
+        // set claim amount higher than channel balance
+        this.plugin._incomingClaim.amount = '101000000'
+
+        this.channelIdRequest.data.protocolData[0].data = Buffer.from('fake_peer_channel_id')
+        await this.plugin._handleData(null, this.channelIdRequest)
+
+        assert.equal(this.plugin._incomingChannel, 'fake_peer_channel_id', 'incoming channel should be set')
+        assert.isTrue(this.watchStub.called, 'should be watching new channel')
+        assert.isTrue(this.claimStub.called, 'should have issued claim')
+        assert.isTrue(claimAssertionSucceeded)
+      })
+
+      it('should not reset channel when the channel stays the same', async function () {
+        // no need to look at the ledger in this test
+        this.plugin._incomingChannel = 'peer_channel_id'
+        this.plugin._outgoingChannel = 'my_channel_id'
+
+        await this.plugin._setIncomingChannel('peer_channel_id')
+
+        assert.equal(this.plugin._incomingChannel, 'peer_channel_id', 'incoming channel should not change')
+        assert.isFalse(this.watchStub.called, 'should be watching new channel')
+        assert.isFalse(this.claimStub.called, 'should not have issued claim')
       })
     })
   })
@@ -274,6 +383,14 @@ describe('Plugin XRP Paychan Symmetric', function () {
       this.getChanStub.rejects(new Error('errrror!'))
       await this.plugin._reloadIncomingChannelDetails()
       assert.isTrue(this.getChanStub.called, 'should have queried ledger for paychan')
+    })
+
+    it('should set last claimed amount', async function () {
+      this.plugin._incomingChannel = 'peer_channel_id'
+      this.getChanStub.resolves(this.channel)
+      await this.plugin._reloadIncomingChannelDetails()
+      assert.isTrue(this.getChanStub.called, 'should have queried ledger for paychan')
+      assert.equal(this.plugin._lastClaimedAmount.toString(), this.plugin.xrpToBase(this.channel.balance))
     })
 
     it('should throw if settleDelay is too soon', async function () {
@@ -480,6 +597,37 @@ describe('Plugin XRP Paychan Symmetric', function () {
           }
         ])
       })
+    })
+
+    it('should fetch peer address from peer', async function () {
+      const xrpAddressStub = this.sinon.stub(this.plugin, '_sendXrpAddressRequest')
+        .resolves({ protocolData: [
+          {
+            protocolName: 'xrp_address',
+            data: Buffer.from('peer_xrp_address')
+          }
+        ]})
+
+      const setAddressStub = this.sinon.stub(this.plugin, '_setPeerAddress')
+
+      delete this.plugin._peerAddress
+
+      await this.plugin._connect()
+      assert.isTrue(xrpAddressStub.called)
+      assert.isTrue(setAddressStub.calledWith('peer_xrp_address'))
+    })
+
+    it('should throw if peer address cannot be fetched', async function () {
+      const xrpAddressStub = this.sinon.stub(this.plugin, '_sendXrpAddressRequest')
+        .rejects(new Error('cannot get address from peer'))
+
+      const setAddressStub = this.sinon.stub(this.plugin, '_setPeerAddress')
+
+      delete this.plugin._peerAddress
+
+      await assert.isRejected(this.plugin._connect(), /cannot get address from peer/)
+      assert.isTrue(xrpAddressStub.called)
+      assert.isFalse(setAddressStub.called)
     })
 
     it('should load outgoing channel if exists', async function () {
