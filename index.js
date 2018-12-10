@@ -146,9 +146,20 @@ class PluginXrpPaychan extends PluginBtp {
   }
 
   async _handleData (from, { requestId, data }) {
-    if (!this._paychanReady) throw new Error('paychan initialization has not completed or has failed.')
-
     const { ilp, protocolMap } = this.protocolDataToIlpAndCustom(data)
+
+    if (protocolMap.xrp_address) {
+      this._log.debug('got xrp_address request from peer')
+      this._setPeerAddress(protocolMap.xrp_address)
+
+      return [{
+        protocolName: 'xrp_address',
+        contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
+        data: Buffer.from(this._address)
+      }]
+    }
+
+    if (!this._paychanReady) throw new Error('paychan initialization has not completed or has failed.')
 
     if (protocolMap.info) {
       this._log.debug('got info request from peer')
@@ -159,17 +170,6 @@ class PluginXrpPaychan extends PluginBtp {
         data: Buffer.from(JSON.stringify({
           currencyScale: this._currencyScale
         }))
-      }]
-    }
-
-    if (protocolMap.xrp_address) {
-      this._log.debug('got xrp_address request from peer')
-      this._setPeerAddress(protocolMap.xrp_address)
-
-      return [{
-        protocolName: 'xrp_address',
-        contentType: BtpPacket.MIME_TEXT_PLAIN_UTF8,
-        data: Buffer.from(this._address)
       }]
     }
 
