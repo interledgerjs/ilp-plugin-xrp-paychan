@@ -6,7 +6,7 @@
   "scripts": {
     "test": "nyc --reporter=lcov mocha --",
     "integration": "nyc --clean false mocha test/integration --",
-    "lint": "standard"
+    "codecov": "nyc report --reporter=json && codecov -f coverage/*.json"
   },
   "author": "",
   "license": "ISC",
