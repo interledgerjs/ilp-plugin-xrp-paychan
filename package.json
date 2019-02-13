@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "nyc mocha --exit",
+    "test-inspect": "nyc mocha --inspect-brk --exit",
     "integration": "nyc --clean false mocha test/integration --",
     "lint": "standard",
     "codecov": "nyc report --reporter=json && codecov -f coverage/*.json"
@@ -38,7 +39,7 @@
     "ilp-plugin-xrp-paychan-shared": "^4.1.0",
     "ilp-store-memory": "^1.0.0",
     "ripple-lib": "^0.22.0",
-    "tweetnacl": "^1.0.0"
+    "sodium-universal": "^2.0.0"
   },
   "repository": {
     "type": "git",
