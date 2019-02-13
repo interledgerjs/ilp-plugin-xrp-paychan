@@ -7,7 +7,7 @@ const BtpPacket = require('btp-packet')
 const { RippleAPI } = require('ripple-lib')
 const { deriveAddress, deriveKeypair } = require('ripple-keypairs')
 const PluginBtp = require('ilp-plugin-btp')
-const nacl = require('tweetnacl')
+const sodium = require('sodium-universal')
 const BigNumber = require('bignumber.js')
 const StoreWrapper = require('./store-wrapper')
 const { MoneyNotSentError } = require('./src/lib/constants')
@@ -91,8 +91,14 @@ class PluginXrpPaychan extends PluginBtp {
       this._log.debug(`setting peer address to`, peerAddress)
       this._peerAddress = peerAddress
 
-      const keyPairSeed = util.hmac(this._secret, CHANNEL_KEYS + this._peerAddress)
-      this._keyPair = nacl.sign.keyPair.fromSeed(keyPairSeed)
+      const keyPairHolder = {
+        publicKey: Buffer.alloc(sodium.crypto_sign_PUBLICKEYBYTES),
+        secretKey: Buffer.alloc(sodium.crypto_sign_SECRETKEYBYTES)
+      }
+      this._keyPair = sodium.crypto_sign_seed_keypair(
+        keyPairHolder.publicKey,
+        keyPairHolder.secretKey,
+        util.hmac(this._secret, CHANNEL_KEYS + this._peerAddress))
     }
   }
 
@@ -487,7 +493,8 @@ class PluginXrpPaychan extends PluginBtp {
 
     const dropClaimAmount = util.xrpToDrops(this.baseToXrp(claimAmount))
     const encodedClaim = util.encodeClaim(dropClaimAmount, this._outgoingChannel)
-    const signature = nacl.sign.detached(encodedClaim, this._keyPair.secretKey)
+    const signature = Buffer.alloc(sodium.crypto_sign_BYTES)
+    sodium.crypto_sign_detached(signature, encodedClaim, this._keyPair.secretKey)
 
     this._log.trace(`signed outgoing claim for ${claimAmount.toString()} drops on ` +
       `channel ${this._outgoingChannel}`)
@@ -569,9 +576,9 @@ class PluginXrpPaychan extends PluginBtp {
 
     let valid = false
     try {
-      valid = nacl.sign.detached.verify(
-        encodedClaim,
+      valid = sodium.crypto_sign_verify_detached(
         Buffer.from(claim.signature, 'hex'),
+        encodedClaim,
         Buffer.from(this._incomingChannelDetails.publicKey.substring(2), 'hex')
       )
     } catch (err) {

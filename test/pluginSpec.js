@@ -4,7 +4,7 @@ const Plugin = require('..')
 const Store = require('ilp-store-memory')
 const BtpPacket = require('btp-packet')
 const { util } = require('ilp-plugin-xrp-paychan-shared')
-const nacl = require('tweetnacl')
+const sodium = require('sodium-universal')
 const { MoneyNotSentError } = require('../src/lib/constants')
 
 const EventEmitter = require('events')
@@ -31,7 +31,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
     })
 
     this.encodeStub = this.sinon.stub(util, 'encodeClaim').returns('abcdefg')
-    this.sinon.stub(nacl.sign, 'detached').returns('abcdefg')
+    this.sinon.stub(sodium, 'crypto_sign_detached').returns('abcdefg')
 
     this.ilpData = {
       protocolData: [{
@@ -561,6 +561,10 @@ describe('Plugin XRP Paychan Symmetric', function () {
       // mock out the rippled connection
       this.plugin._api.connection = new EventEmitter()
       this.plugin._api.connection.request = () => Promise.resolve(null)
+      this.plugin._keyPair = {
+        publicKey: Buffer.alloc(sodium.crypto_sign_PUBLICKEYBYTES),
+        secretKey: Buffer.alloc(sodium.crypto_sign_SECRETKEYBYTES)
+      }
       this.sinon.stub(this.plugin._api, 'connect').resolves(null)
 
       this.channelId = '945BB98D2F03DFA2AED810F8917B2BC344C0AA182A5DB506C16F84593C24244F'
@@ -592,7 +596,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
             amount: '1.000000',
             destination: 'rKwCnwtM6et7BVaCZm97hbU8oXkoohReea',
             settleDelay: 3600,
-            publicKey: 'ED9BE8997EFFA0A6C6FE9244D0FF8B47D7BEE85A7AF2BC8390FA29474A6D085164',
+            publicKey: 'ED0000000000000000000000000000000000000000000000000000000000000000',
             sourceTag: 1
           }
         ])
@@ -737,6 +741,10 @@ describe('Plugin XRP Paychan Symmetric', function () {
   describe('_sendMoney', function () {
     beforeEach(function () {
       this.plugin._funding = true // turn off the funding path
+      this.plugin._keyPair = {
+        publicKey: Buffer.alloc(sodium.crypto_sign_PUBLICKEYBYTES),
+        secretKey: Buffer.alloc(sodium.crypto_sign_SECRETKEYBYTES)
+      }
       this.plugin._outgoingChannel = 'my_channel_id'
       this.plugin._outgoingClaim = { amount: '0' }
       this.plugin._outgoingChannelDetails = {
@@ -744,7 +752,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
       }
       this._outgoingClaim = {
         amount: '100',
-        signature: '61626364656667'
+        signature: '00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
       }
     })
 
@@ -881,7 +889,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
         signature: 'abcdefg'
       }
 
-      this.naclStub = this.sinon.stub(nacl.sign.detached, 'verify').returns(true)
+      this.soidumStub = this.sinon.stub(sodium, 'crypto_sign_verify_detached').returns(true)
     })
 
     it('throws an error if new claim is less than old claim', async function () {
@@ -892,7 +900,7 @@ describe('Plugin XRP Paychan Symmetric', function () {
     })
 
     it('throws an error if the signature is not valid', async function () {
-      this.naclStub.throws()
+      this.soidumStub.throws()
       await assert.isRejected(
         this.plugin._handleMoney(null, { requestId: 1, data: this.claimData() }),
         /got invalid claim signature abcdefg for amount 100 drops total/)
